@@ -1,0 +1,6 @@
+.next
+node_modules
+package-lock.json
+next-env.d.ts
+# 設計資料の表は手で揃える。整形の差分で中身の変更が埋もれないようにする
+*.md
