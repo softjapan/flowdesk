@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { SignOutButton } from "@/components/sign-out-button";
 import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
@@ -98,6 +99,9 @@ export default function OrgLayout({
           <span className="text-sm text-muted-foreground">
             FlowDesk
           </span>
+          <div className="ml-auto">
+            <SignOutButton />
+          </div>
         </header>
         <div className="flex-1 px-6 py-6">{children}</div>
       </SidebarInset>

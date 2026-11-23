@@ -4,6 +4,7 @@ import { listLocations } from "@/server/repositories/catalog";
 import {
   findMember,
   findOrganizationBySlug,
+  listOrganizationsForUser,
 } from "@/server/repositories/organizations";
 
 /** 組織の画面で、Service に渡す「誰が・どの組織で」の情報 */
@@ -45,3 +46,14 @@ export const getOrgContext = cache(async function getOrgContext(
     timezone: location?.timezone ?? "Asia/Tokyo",
   };
 });
+
+/**
+ * ログイン後の行き先にする組織のスラッグ（最初に所属した組織）。
+ * どの組織にも所属していなければ null（組織の作成は第10章の /orgs）。
+ */
+export async function findHomeOrgSlug(
+  userId: string,
+): Promise<string | null> {
+  const [first] = await listOrganizationsForUser(userId);
+  return first?.slug ?? null;
+}

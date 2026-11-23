@@ -48,6 +48,21 @@ npm run dev                 # http://localhost:3000
 
 `npm run check` は DB なしで通る（`*.db.test.ts` は含まない）。
 
+`.env.local` の `BETTER_AUTH_SECRET` は、`openssl rand -base64 32` で作ったランダムな値に置き換える。
+
+### 開発用のログイン
+
+`npm run db:seed` のあと、http://localhost:3000/login で次のユーザーでログインできる。
+パスワードは開発用 DB とテスト用 DB だけに入る（シードは本番では実行しない）。
+
+| メールアドレス | パスワード | 所属とロール |
+|----------------|------------|--------------|
+| `user-demo@example.com` | `flowdesk-demo-2026` | デモサロンの Owner、さくら整体院の Staff |
+
+他のシードのユーザー（`user-a1@example.com`（デモサロンの Admin）、`user-a2@example.com`（デモサロンの Staff）など）も同じパスワードでログインできる。
+
+パスワード再設定のメールは Mailpit（http://localhost:8025）に届く。
+
 | サービス | URL |
 |----------|-----|
 | アプリ | http://localhost:3000 |

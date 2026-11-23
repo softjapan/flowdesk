@@ -13,6 +13,7 @@ import {
   TREND_DAYS,
 } from "@/server/services/dashboard";
 import {
+  findHomeOrgSlug,
   getOrgContext,
   type OrgContext,
 } from "@/server/services/org-context";
@@ -40,6 +41,16 @@ describe("getOrgContext", () => {
     expect(
       await getOrgContext("no-such-org", DEMO_USER_ID),
     ).toBeNull();
+  });
+});
+
+describe("findHomeOrgSlug", () => {
+  it("最初に所属した組織のスラッグを返す", async () => {
+    expect(await findHomeOrgSlug(DEMO_USER_ID)).toBe("demo-salon");
+  });
+
+  it("どの組織にも所属していなければ null", async () => {
+    expect(await findHomeOrgSlug("no-such-user")).toBeNull();
   });
 });
 

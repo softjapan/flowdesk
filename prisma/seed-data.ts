@@ -16,7 +16,11 @@ import type {
   ReservationStatus,
   Role,
 } from "../src/server/domain.ts";
-import { DEMO_USER_ID } from "../src/server/demo-user.ts";
+import { hashPassword } from "better-auth/crypto";
+import {
+  DEMO_USER_ID,
+  DEMO_USER_PASSWORD,
+} from "../src/server/demo-user.ts";
 import type { PrismaClient } from "../src/generated/prisma/client.ts";
 
 export type Organization = { id: string; name: string; slug: string };
@@ -383,7 +387,12 @@ const reservationTemplates: Record<string, ReservationTemplate[]> = {
   org_c: buildTemplates(-5, 5, 1, 4, 1),
 };
 
-export type User = { id: string; name: string; email: string };
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+};
 
 const userNames: Record<string, string> = {
   [DEMO_USER_ID]: "デモ ユーザー",
@@ -412,6 +421,7 @@ export function buildSeedData(now: Date): SeedData {
       id,
       name: userNames[id] ?? id,
       email: `${id.replace(/_/g, "-")}@example.com`,
+      emailVerified: true,
     }),
   );
   const reservations = organizations.flatMap((o) => {
@@ -466,11 +476,25 @@ export async function seedDatabase(
   }
   const data = buildSeedData(now);
   const createdAt = new Date("2026-01-01T00:00:00Z");
+  // 全員に同じ開発用パスワードを設定する（Better Auth と同じ scrypt で
+  // ハッシュ化する）。ロールごとの動作をどのユーザーでも試せるようにする
+  const password = await hashPassword(DEMO_USER_PASSWORD);
   await prisma.$transaction([
     prisma.$executeRawUnsafe(
       `TRUNCATE TABLE ${tables.map((t) => `"${t}"`).join(", ")} CASCADE`,
     ),
     prisma.user.createMany({ data: data.users }),
+    // Better Auth のメールアドレスとパスワードのログインは、
+    // providerId が "credential" の account にパスワードを持つ
+    prisma.account.createMany({
+      data: data.users.map((u) => ({
+        id: `acc_${u.id}`,
+        accountId: u.id,
+        providerId: "credential",
+        userId: u.id,
+        password,
+      })),
+    }),
     prisma.organization.createMany({
       data: data.organizations.map((o) => ({ ...o, createdAt })),
     }),

@@ -47,3 +47,28 @@ export async function findMember(
   const role = toRole(member.role);
   return role ? { ...member, role } : null;
 }
+
+/**
+ * ユーザーが所属する組織（ログイン後の行き先・第10章の組織の選択で使う）。
+ * 「自分の所属」を引くので organizationId ではなく userId で絞り込む。
+ * ロールが FlowDesk のものでない所属は含めない。
+ */
+export async function listOrganizationsForUser(
+  userId: string,
+  db: Db = getPrisma(),
+) {
+  const members = await db.member.findMany({
+    where: { userId },
+    select: {
+      role: true,
+      organization: {
+        select: { id: true, name: true, slug: true },
+      },
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  return members.flatMap((m) => {
+    const role = toRole(m.role);
+    return role ? [{ ...m.organization, role }] : [];
+  });
+}

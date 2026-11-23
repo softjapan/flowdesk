@@ -1,5 +1,9 @@
 /** シードの中身（DB を使わない）。投入前に壊れていないことを確かめる */
 import { describe, expect, it } from "vitest";
+import {
+  DEMO_USER_EMAIL,
+  DEMO_USER_ID,
+} from "../src/server/demo-user";
 import { buildSeedData } from "./seed-data";
 
 const data = buildSeedData(new Date("2026-11-23T03:00:00Z"));
@@ -55,5 +59,11 @@ describe("buildSeedData", () => {
     const users = new Set(data.users.map((u) => u.id));
     for (const m of data.members)
       expect(users.has(m.userId)).toBe(true);
+  });
+
+  it("デモユーザーのメールアドレスは README・定数と一致する", () => {
+    expect(data.users.find((u) => u.id === DEMO_USER_ID)?.email).toBe(
+      DEMO_USER_EMAIL,
+    );
   });
 });

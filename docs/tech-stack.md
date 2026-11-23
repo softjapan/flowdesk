@@ -35,6 +35,7 @@
 | ORM | prisma / @prisma/client / @prisma/adapter-pg | 7.10.1 | npm の `prisma@latest` は 8.0.0-rc.34（RC）。Better Auth の peer 依存が `^7` までなので 7 系に固定 |
 | DB ドライバ | pg | 8.23.1 | Prisma 7 のドライバアダプター経由で使う |
 | 型定義 | @types/pg | 8.23.1 | dev。テスト用 DB の作成（`test/db-global-setup.ts`）で `pg` を直接使う |
+| メール | nodemailer | 10.6.1 | 第8章。SMTP でメールを送る（ローカルは Mailpit、本番は SES の SMTP）。型定義を同梱するので `@types/nodemailer` は入れない |
 | 検証 | zod | 4.6.7 | |
 | 決済 | stripe | 23.2.0 | テストモードのみ使用 |
 | AWS | @aws-sdk/client-s3 / client-sqs | 3.1175.0 | |
@@ -59,3 +60,6 @@
 12. **Prisma 7 では `migrate dev` と `migrate reset` がシードを実行しない（`--skip-seed` もない）。** `npm run db:reset` は reset の後に `prisma db seed` を続けて実行する。`migrate dev` は Client も生成しないので、`postinstall` と `db:generate` で `prisma generate` を実行する（第7章）。
 13. **シードを `node prisma/seed.ts` で直接実行するため、generator に `importFileExtension = "ts"` を指定する。** 生成された Client の import に `.ts` が付き、Node 24 の型の除去でそのまま読める。`tsconfig.json` には `allowImportingTsExtensions` を足す（第7章）。
 14. **`npm audit` で、`prisma`（dev）が依存する `effect` に high（ReDoS、Schema.TemplateLiteral）が出る（2026-11-23 時点）。** CLI だけが使い、本番の実行時には入らない。修正版の Prisma 7 が出たら更新する（第7章）。
+15. **Better Auth のパスワード再設定のリンクは `/api/auth/reset-password/:token?callbackURL=...` になる。** Better Auth がトークンを確かめてから `callbackURL`（`/reset-password`）に `?token=` を付けてリダイレクトし、無効・期限切れなら `?error=INVALID_TOKEN` を付ける。クライアントのメソッドは `requestPasswordReset`（旧 `forgetPassword`）（第8章）。
+16. **Better Auth の `secret` が未設定だと、開発では既定の値で動き、`NODE_ENV=production` では初期化が `BetterAuthError`（default secret）で失敗する。** `next build` は失敗せずに終わるがログにこのエラーが出て、起動後の認証の API はすべて失敗する。`.env.local` と本番の環境変数に `BETTER_AUTH_SECRET` と `BETTER_AUTH_URL` を入れる（第8章）。
+17. **シードのパスワードは `better-auth/crypto` の `hashPassword`（scrypt）でハッシュ化し、`account` に `providerId: "credential"` で入れる。** Better Auth のメールアドレスとパスワードのログインはこの行を見る（第8章）。
