@@ -7,7 +7,7 @@ export default function OrgNotFound() {
       <h1 className="text-lg font-semibold">
         ページが見つかりません
       </h1>
-      <p className="text-sm text-zinc-600">
+      <p className="text-sm text-muted-foreground">
         URL
         が正しいか、組織のメンバーとして招待されているかを確認してください。
       </p>

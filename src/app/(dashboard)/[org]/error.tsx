@@ -24,10 +24,10 @@ export default function OrgError({
       <h2 className="text-lg font-semibold">
         画面を表示できませんでした
       </h2>
-      <p className="text-sm text-zinc-600">
+      <p className="text-sm text-muted-foreground">
         時間をおいて再度お試しください。
         {digest && (
-          <span className="ml-1 text-zinc-400">
+          <span className="ml-1 text-muted-foreground">
             （エラー ID: {digest}）
           </span>
         )}
@@ -35,7 +35,7 @@ export default function OrgError({
       <button
         type="button"
         onClick={() => retry()}
-        className="rounded border border-zinc-300 px-3 py-1 text-sm"
+        className="rounded border border-input px-3 py-1 text-sm"
       >
         再読み込み
       </button>
