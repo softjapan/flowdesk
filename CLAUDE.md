@@ -1,5 +1,7 @@
 # FlowDesk
 
+@AGENTS.md
+
 予約・顧客管理 SaaS。Next.js（App Router）でフロントとバックエンドを一つのリポジトリにまとめる。
 
 ## 最初に読むもの
