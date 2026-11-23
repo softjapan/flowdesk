@@ -58,6 +58,10 @@ function Select({
   return (
     <FieldShell id={id} label={label} error={error}>
       <select
+        // 送信後、React はフォームを初期状態に戻す。input は新しい
+        // defaultValue に戻るが、select は最初の選択に戻ってしまうので、
+        // 値が変わったら作り直して、送った値を選ばれた状態にする
+        key={values[name] ?? ""}
         id={id}
         name={name}
         required
