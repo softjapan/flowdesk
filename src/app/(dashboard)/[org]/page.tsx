@@ -1,10 +1,40 @@
 import { notFound } from "next/navigation";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { formatTime, formatYmd } from "@/lib/datetime";
 import { formatYen } from "@/lib/money";
 import { getDashboard } from "@/server/services/dashboard";
 import { getOrgContext } from "@/server/services/org-context";
 import { getCurrentUserId } from "@/server/session";
-import { statusLabels } from "./_components/status-label";
+import { StatusBadge } from "./_components/status-badge";
+import { TrendChart } from "./_components/trend-chart";
+
+function KpiCard({ label, value }: { label: string; value: string }) {
+  // dl の中で dt と dd をまとめる div として Card を使う
+  return (
+    <Card>
+      <CardContent className="space-y-1">
+        <dt className="text-sm text-muted-foreground">{label}</dt>
+        <dd className="text-3xl font-semibold tabular-nums">
+          {value}
+        </dd>
+      </CardContent>
+    </Card>
+  );
+}
 
 // S-06 ダッシュボード
 export default async function DashboardPage({
@@ -15,7 +45,10 @@ export default async function DashboardPage({
   if (!ctx) notFound();
   const dashboard = await getDashboard(ctx, new Date());
   const { month, trend, today, timezone } = dashboard;
-  const maxCount = Math.max(1, ...trend.map((d) => d.count));
+  const trendData = trend.map((d) => ({
+    ...d,
+    label: formatYmd(d.date),
+  }));
 
   return (
     <div className="space-y-8">
@@ -25,92 +58,95 @@ export default async function DashboardPage({
         <h2 id="kpi" className="font-semibold">
           今月の実績
         </h2>
-        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded border border-zinc-200 p-4">
-            <dt className="text-sm text-zinc-500">予約数</dt>
-            <dd className="text-2xl">{month.reservationCount} 件</dd>
-          </div>
-          <div className="rounded border border-zinc-200 p-4">
-            <dt className="text-sm text-zinc-500">顧客数</dt>
-            <dd className="text-2xl">{month.customerCount} 人</dd>
-          </div>
+        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <KpiCard
+            label="予約数"
+            value={`${month.reservationCount} 件`}
+          />
+          <KpiCard
+            label="顧客数"
+            value={`${month.customerCount} 人`}
+          />
+          {/* Staff には Service が売上を返さない（null） */}
           {month.revenueYen !== null && (
-            <div className="rounded border border-zinc-200 p-4">
-              <dt className="text-sm text-zinc-500">売上</dt>
-              <dd className="text-2xl">
-                {formatYen(month.revenueYen)}
-              </dd>
-            </div>
+            <KpiCard
+              label="売上"
+              value={formatYen(month.revenueYen)}
+            />
           )}
         </dl>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-muted-foreground">
           キャンセルを除く。顧客数は今月に予約がある顧客の人数。
         </p>
       </section>
 
-      <section aria-labelledby="trend" className="space-y-2">
-        <h2 id="trend" className="font-semibold">
-          予約推移（直近 {trend.length} 日）
-        </h2>
-        <table className="text-sm">
-          <tbody>
-            {trend.map((d) => (
-              <tr key={d.date}>
-                <th
-                  scope="row"
-                  className="pr-3 text-left font-normal text-zinc-600"
-                >
-                  {formatYmd(d.date)}
-                </th>
-                <td className="w-64">
-                  <div
-                    className="h-3 bg-zinc-400"
-                    style={{
-                      width: `${(d.count / maxCount) * 100}%`,
-                    }}
-                  />
-                </td>
-                <td className="pl-3 text-right">{d.count} 件</td>
+      <Card aria-labelledby="trend" role="region">
+        <CardHeader>
+          <CardTitle>
+            <h2 id="trend">予約推移</h2>
+          </CardTitle>
+          <CardDescription>
+            直近 {trend.length} 日の日別予約数（キャンセルを除く）
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TrendChart data={trendData} />
+          <table className="sr-only">
+            <caption>日別の予約数</caption>
+            <thead>
+              <tr>
+                <th scope="col">日付</th>
+                <th scope="col">予約数</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+            </thead>
+            <tbody>
+              {trendData.map((d) => (
+                <tr key={d.date}>
+                  <th scope="row">{d.label}</th>
+                  <td>{d.count} 件</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
 
       <section aria-labelledby="today" className="space-y-2">
         <h2 id="today" className="font-semibold">
           本日の予約（{formatYmd(dashboard.todayYmd)}）
         </h2>
         {today.length === 0 ? (
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-muted-foreground">
             本日の予約はありません。
           </p>
         ) : (
-          <table className="text-sm">
-            <thead>
-              <tr className="text-left text-zinc-500">
-                <th className="pr-4 font-normal">時間</th>
-                <th className="pr-4 font-normal">顧客</th>
-                <th className="pr-4 font-normal">メニュー</th>
-                <th className="pr-4 font-normal">担当</th>
-                <th className="font-normal">状態</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>時間</TableHead>
+                <TableHead>顧客</TableHead>
+                <TableHead>メニュー</TableHead>
+                <TableHead>担当</TableHead>
+                <TableHead>状態</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {today.map((r) => (
-                <tr key={r.id}>
-                  <td className="pr-4">
+                <TableRow key={r.id}>
+                  <TableCell className="tabular-nums">
                     {formatTime(r.startsAt, timezone)}〜
                     {formatTime(r.endsAt, timezone)}
-                  </td>
-                  <td className="pr-4">{r.customerName}</td>
-                  <td className="pr-4">{r.serviceName}</td>
-                  <td className="pr-4">{r.staffName}</td>
-                  <td>{statusLabels[r.status]}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell>{r.customerName}</TableCell>
+                  <TableCell>{r.serviceName}</TableCell>
+                  <TableCell>{r.staffName}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={r.status} />
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </section>
     </div>

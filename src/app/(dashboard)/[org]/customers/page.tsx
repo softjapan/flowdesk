@@ -1,5 +1,17 @@
+import { Plus } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { listCustomers } from "@/server/services/customers";
 import { getOrgContext } from "@/server/services/org-context";
 import { getCurrentUserId } from "@/server/session";
@@ -23,78 +35,91 @@ export default async function CustomersPage({
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">顧客一覧</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold">顧客一覧</h1>
+        {/* 顧客の作成は全ロールに許可（docs/authz-matrix.md） */}
+        <Button asChild>
+          <Link href={`/${ctx.slug}/customers/new`}>
+            <Plus aria-hidden="true" />
+            新規登録
+          </Link>
+        </Button>
+      </div>
 
-      <form role="search" className="flex items-center gap-2 text-sm">
-        <label htmlFor="q">検索</label>
-        <input
-          id="q"
-          name="q"
-          type="search"
-          defaultValue={q}
-          placeholder="氏名・フリガナ・電話・メール"
-          className="w-72 rounded border border-zinc-300 px-2 py-1"
-        />
-        <button
-          type="submit"
-          className="rounded border border-zinc-300 px-3 py-1"
-        >
+      <form role="search" className="flex items-end gap-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="q">検索</Label>
+          <Input
+            id="q"
+            name="q"
+            type="search"
+            defaultValue={q}
+            placeholder="氏名・フリガナ・電話・メール"
+            className="w-72"
+          />
+        </div>
+        <Button type="submit" variant="outline">
           検索
-        </button>
+        </Button>
       </form>
 
-      <p className="text-sm text-zinc-600">
+      <p className="text-sm text-muted-foreground">
         {list.total} 件{q && <>（「{q}」で検索）</>}
       </p>
 
       {list.items.length === 0 ? (
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-muted-foreground">
           該当する顧客はいません。
         </p>
       ) : (
-        <table className="text-sm">
-          <thead>
-            <tr className="text-left text-zinc-500">
-              <th className="pr-6 font-normal">氏名</th>
-              <th className="pr-6 font-normal">フリガナ</th>
-              <th className="pr-6 font-normal">電話番号</th>
-              <th className="font-normal">メール</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>氏名</TableHead>
+              <TableHead>フリガナ</TableHead>
+              <TableHead>電話番号</TableHead>
+              <TableHead>メール</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {list.items.map((c) => (
-              <tr key={c.id}>
-                <td className="pr-6">{c.name}</td>
-                <td className="pr-6">{c.nameKana}</td>
-                <td className="pr-6">{c.phone}</td>
-                <td>{c.email}</td>
-              </tr>
+              <TableRow key={c.id}>
+                <TableCell className="font-medium">
+                  {c.name}
+                </TableCell>
+                <TableCell>{c.nameKana}</TableCell>
+                <TableCell className="tabular-nums">
+                  {c.phone}
+                </TableCell>
+                <TableCell>{c.email}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
 
       {list.pageCount > 1 && (
-        <nav
-          aria-label="ページ"
-          className="flex items-center gap-3 text-sm"
-        >
+        <nav aria-label="ページ" className="flex items-center gap-3">
           {page > 1 ? (
-            <Link href={pageHref(page - 1)} className="underline">
-              前へ
-            </Link>
+            <Button asChild variant="outline" size="sm">
+              <Link href={pageHref(page - 1)}>前へ</Link>
+            </Button>
           ) : (
-            <span className="text-zinc-400">前へ</span>
+            <Button variant="outline" size="sm" disabled>
+              前へ
+            </Button>
           )}
-          <span>
+          <span className="text-sm tabular-nums">
             {page} / {list.pageCount}
           </span>
           {page < list.pageCount ? (
-            <Link href={pageHref(page + 1)} className="underline">
-              次へ
-            </Link>
+            <Button asChild variant="outline" size="sm">
+              <Link href={pageHref(page + 1)}>次へ</Link>
+            </Button>
           ) : (
-            <span className="text-zinc-400">次へ</span>
+            <Button variant="outline" size="sm" disabled>
+              次へ
+            </Button>
           )}
         </nav>
       )}

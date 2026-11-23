@@ -23,7 +23,13 @@
 | UI | react / react-dom | 19.3.0 | create-next-app が固定した版 |
 | 言語 | typescript | 5.9.3 | npm の `latest` は 7.0.2 だが、create-next-app のテンプレートは `^5`。Next 16 の公式テンプレートに合わせる |
 | CSS | tailwindcss | 4.3.3 | v4（CSS ファースト設定。`tailwind.config.js` なし） |
-| UI 部品 | shadcn (CLI) | 4.23.0 | 第6章で導入 |
+| UI 部品 | shadcn (CLI) | 4.23.0 | 第6章で導入。`init -b radix -p nova`。`globals.css` が `shadcn/tailwind.css` を読むので dependencies に入る |
+| UI 部品 | radix-ui | 1.8.1 | shadcn/ui の部品の土台（Sidebar・Sheet・Label など） |
+| UI 部品 | class-variance-authority | 0.7.1 | shadcn/ui のバリアント定義 |
+| UI 部品 | cn | 0.5.2 | shadcn/ui の `cn()`。shadcn 4.23.0 は `clsx` + `tailwind-merge` の代わりにこれを入れる（後述） |
+| UI 部品 | tw-animate-css | 1.4.0 | shadcn/ui のアニメーション（Tailwind v4 用） |
+| アイコン | lucide-react | 1.78.0 | shadcn/ui の既定のアイコン |
+| グラフ | recharts | 3.8.0 | shadcn/ui の `chart` 部品が使う。ダッシュボードの予約推移 |
 | 認証 | better-auth | 1.7.27 | Auth.js はメンテナンスがセキュリティ修正のみになり、公式が新規プロジェクトに Better Auth を推奨（nextauthjs/next-auth discussion #13252）。`organization` プラグインでテナントとロールを扱う |
 | ORM | prisma / @prisma/client / @prisma/adapter-pg | 7.10.1 | npm の `prisma@latest` は 8.0.0-rc.34（RC）。Better Auth の peer 依存が `^7` までなので 7 系に固定 |
 | DB ドライバ | pg | 8.23.1 | Prisma 7 のドライバアダプター経由で使う |
@@ -43,3 +49,6 @@
 4. **`minio/minio` のイメージは Docker Hub から取得できない（2026-11-23 時点、`pull access denied`）。** S3 互換のローカル環境には RustFS を使う。署名付き URL での PUT と CORS のプリフライトが通ることを確認した（第4・11章）。
 5. **`npx prisma` はローカルに入れる前だと 8.0.0-rc を取ってくる。** `prisma` を devDependencies に固定してから使う（第7章）。
 6. **Next 16 は `AGENTS.md` を生成し、`node_modules/next/dist/docs/` に版に対応したドキュメントを同梱する。** `CLAUDE.md` から `@AGENTS.md` で読み込ませる（第2・4章）。
+7. **shadcn 4.23.0 の `init` は `clsx` と `tailwind-merge` を入れず、`cn` パッケージ（`shadcn-ui/cn`）を入れる。** `src/lib/utils.ts` は `export { cn } from "cn"` だけになり、部品も `"cn"` から直接 import する。CLI のコードに `clsx`・`tailwind-merge` から `cn` へ書き換える処理があることを確認した（第6章）。
+8. **shadcn 4.23.0 の `init` は `globals.css` に `--font-sans: var(--font-sans)` と自己参照で書く。** フォントが効かないので `var(--font-geist-sans)` に直す（第6章）。
+9. **`SidebarMenuSkeleton` は幅を `Math.random()` で決める。** Cache Components ではプリレンダーとハイドレーションで値がずれるので、Suspense の fallback には固定幅の `Skeleton` を使う（第6章）。

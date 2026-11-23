@@ -1,7 +1,19 @@
-import Link from "next/link";
 import { Suspense } from "react";
+import { Separator } from "@/components/ui/separator";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getOrgContext } from "@/server/services/org-context";
 import { getCurrentUserId } from "@/server/session";
+import { NavMenu } from "./_components/nav-menu";
 
 const roleLabels = {
   owner: "Owner",
@@ -11,7 +23,7 @@ const roleLabels = {
 
 // params はここで await せず、Suspense の内側で読む
 // （レイアウトの外枠を静的なシェルとして先に返すため）
-async function OrgNav({
+async function OrgHeader({
   params,
 }: {
   params: Promise<{ org: string }>;
@@ -19,34 +31,37 @@ async function OrgNav({
   const { org } = await params;
   const ctx = await getOrgContext(org, await getCurrentUserId());
   // 組織が見つからない場合は page 側で 404 にする。ここでは何も出さない
-  if (!ctx) return null;
-  const base = `/${ctx.slug}`;
+  if (!ctx) return <p className="px-2 font-semibold">FlowDesk</p>;
   return (
-    <>
-      <p className="font-semibold">
-        {ctx.organizationName}
-        <span className="ml-2 text-sm font-normal text-zinc-500">
-          {roleLabels[ctx.role]}
-        </span>
+    <div className="px-2">
+      <p className="truncate font-semibold">{ctx.organizationName}</p>
+      <p className="text-xs text-muted-foreground">
+        {roleLabels[ctx.role]}
       </p>
-      <ul className="flex gap-4 text-sm">
-        <li>
-          <Link href={base} className="underline">
-            ダッシュボード
-          </Link>
-        </li>
-        <li>
-          <Link href={`${base}/reservations`} className="underline">
-            予約カレンダー
-          </Link>
-        </li>
-        <li>
-          <Link href={`${base}/customers`} className="underline">
-            顧客一覧
-          </Link>
-        </li>
-      </ul>
-    </>
+    </div>
+  );
+}
+
+async function OrgNav({
+  params,
+}: {
+  params: Promise<{ org: string }>;
+}) {
+  const { org } = await params;
+  const ctx = await getOrgContext(org, await getCurrentUserId());
+  if (!ctx) return null;
+  return <NavMenu slug={ctx.slug} role={ctx.role} />;
+}
+
+// SidebarMenuSkeleton は幅を Math.random で決めるため、
+// プリレンダーとハイドレーションで値が変わる。固定幅の Skeleton を使う
+function NavFallback() {
+  return (
+    <div className="space-y-2 px-2 py-1" aria-hidden="true">
+      {Array.from({ length: 3 }, (_, i) => (
+        <Skeleton key={i} className="h-6 w-3/4" />
+      ))}
+    </div>
   );
 }
 
@@ -55,17 +70,37 @@ export default function OrgLayout({
   params,
 }: LayoutProps<"/[org]">) {
   return (
-    <div className="flex flex-1 flex-col">
-      <header className="border-b border-zinc-200 px-6 py-3">
-        <nav className="flex flex-wrap items-center justify-between gap-2">
+    <SidebarProvider>
+      <Sidebar>
+        <SidebarHeader>
           <Suspense
-            fallback={<p className="text-zinc-400">FlowDesk</p>}
+            fallback={<p className="px-2 font-semibold">FlowDesk</p>}
           >
-            <OrgNav params={params} />
+            <OrgHeader params={params} />
           </Suspense>
-        </nav>
-      </header>
-      <main className="flex-1 px-6 py-6">{children}</main>
-    </div>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <nav aria-label="メインメニュー">
+                <Suspense fallback={<NavFallback />}>
+                  <OrgNav params={params} />
+                </Suspense>
+              </nav>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+      </Sidebar>
+      <SidebarInset>
+        <header className="flex h-12 items-center gap-2 border-b px-4">
+          <SidebarTrigger aria-label="メニューの開閉" />
+          <Separator orientation="vertical" className="h-4" />
+          <span className="text-sm text-muted-foreground">
+            FlowDesk
+          </span>
+        </header>
+        <div className="flex-1 px-6 py-6">{children}</div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
