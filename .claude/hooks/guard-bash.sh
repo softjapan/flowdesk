@@ -23,8 +23,9 @@ if grep -Eq 'rm -rf (/|~|\.|\*)/?( |;|&|$)' <<<"$command"; then
   block "広い範囲の削除は禁止"
 fi
 
-# .env をシェル経由で読む抜け道をふさぐ（.env.example は許可）
-if grep -Eq '\.env(\.local|\.production|\.[a-z]+\.local)?([^.a-zA-Z]|$)' \
+# .env をシェル経由で読む抜け道をふさぐ（.env.example は許可）。
+# 直前を「行頭・空白・/・引用符・<」に限り、process.env は止めない
+if grep -Eq "(^|[[:space:]/'\"<])\.env(\.local|\.production|\.[a-z]+\.local)?([^.a-zA-Z]|$)" \
   <<<"$command"; then
   block ".env は読まない。変数名は .env.example を見る"
 fi
