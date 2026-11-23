@@ -1,0 +1,49 @@
+# ローカル開発用のインフラ。アプリ本体（Next.js）はホストで npm run dev する。
+# 本番の AWS サービスとの対応：
+#   db     → RDS for PostgreSQL
+#   s3     → S3（RustFS は S3 互換 API を持つ）
+#   sqs    → SQS（ElasticMQ は SQS 互換 API を持つ）
+#   mail   → SES（Mailpit は SMTP で受けて Web 画面に表示する）
+services:
+  db:
+    image: postgres:18.7
+    environment:
+      POSTGRES_USER: flowdesk
+      POSTGRES_PASSWORD: flowdesk
+      POSTGRES_DB: flowdesk
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowdesk -d flowdesk"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  s3:
+    image: rustfs/rustfs:1.0.6
+    environment:
+      RUSTFS_ACCESS_KEY: flowdesk
+      RUSTFS_SECRET_KEY: flowdesk-secret
+    ports:
+      - "9000:9000"
+    volumes:
+      - s3-data:/data
+
+  sqs:
+    image: softwaremill/elasticmq-native:1.7.1
+    ports:
+      - "9324:9324"
+    volumes:
+      - ./docker/elasticmq.conf:/opt/elasticmq.conf:ro
+
+  mail:
+    image: axllent/mailpit:v1.34.0
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web 画面
+
+volumes:
+  db-data:
+  s3-data:
