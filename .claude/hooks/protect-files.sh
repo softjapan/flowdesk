@@ -14,9 +14,12 @@ case "$rel" in
   package-lock.json)
     block "package-lock.json は npm に更新させる" ;;
   prisma/migrations/*/migration.sql)
-    # 新規作成は許可し、既存ファイルの書き換えだけを止める
-    if [ -e "$file" ]; then
-      block "適用済みのマイグレーションは書き換えない。新しいマイグレーションを作る"
+    # コミット済みのマイグレーションだけを守る。他の人や本番の DB にも
+    # 適用されうるため。--create-only で作った直後の未コミットのファイルは、
+    # 読んで SQL を書き足せるよう編集を許す
+    if git -C "$CLAUDE_PROJECT_DIR" ls-files --error-unmatch "$rel" \
+      >/dev/null 2>&1; then
+      block "コミット済みのマイグレーションは書き換えない。新しいマイグレーションを作る"
     fi ;;
 esac
 
