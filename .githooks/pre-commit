@@ -1,0 +1,20 @@
+#!/bin/bash
+# コミット前の品質ゲート。npm install 時に prepare スクリプトが
+# core.hooksPath を .githooks に向けるので、clone した全員に効く。
+set -e
+
+# 1. 秘密情報らしきものがステージされていないか
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+if grep -Eq '(^|/)\.env($|\.local$|\..+\.local$|\.production$)' \
+  <<<"$staged"; then
+  echo "pre-commit: .env ファイルはコミットしない" >&2
+  exit 1
+fi
+# 検出パターンを書いたこのファイル自身は対象から外す
+if git diff --cached -U0 -- . ':(exclude).githooks' | grep -Eq '^\+.*(sk_live_|rk_live_|AKIA[0-9A-Z]{16})'; then
+  echo "pre-commit: 本番の API キーらしき文字列が含まれている" >&2
+  exit 1
+fi
+
+# 2. 型チェック・Lint・整形・テスト
+npm run --silent check

@@ -25,3 +25,19 @@ git checkout ch04
 | `ch02` | Claude Code の設定（CLAUDE.md・権限・Hooks・Skills・Subagents） |
 | `ch03` | 設計資料（`docs/`） |
 | `ch04` | Next.js の土台、Docker Compose、品質ゲート |
+
+## セットアップ
+
+Node.js 24.13.0 と Docker が必要。
+
+```bash
+npm install                 # prepare スクリプトが Git フックを有効にする
+cp .env.example .env.local
+docker compose up -d --wait # PostgreSQL・S3 互換・SQS 互換・メール
+npm run dev                 # http://localhost:3000
+```
+
+| サービス | URL |
+|----------|-----|
+| アプリ | http://localhost:3000 |
+| メール（Mailpit） | http://localhost:8025 |
