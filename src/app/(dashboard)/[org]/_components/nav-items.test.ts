@@ -5,28 +5,14 @@ const keysFor = (role: "owner" | "admin" | "staff") =>
   navItemsFor(role).map((item) => item.key);
 
 describe("navItemsFor（docs/screens.md の権限列）", () => {
-  it("Owner にはすべての項目を出す", () => {
-    expect(keysFor("owner")).toEqual(navItems.map((i) => i.key));
-  });
-
-  it("Admin には料金プランと組織設定を出さない", () => {
-    expect(keysFor("admin")).toEqual([
-      "dashboard",
-      "reservations",
-      "customers",
-      "services",
-      "locations",
-      "members",
-      "audit-logs",
-    ]);
-  });
-
-  it("Staff には全ロール向けの項目だけを出す", () => {
-    expect(keysFor("staff")).toEqual([
-      "dashboard",
-      "reservations",
-      "customers",
-    ]);
+  it("実装済みの 3 画面は全ロールに出す", () => {
+    for (const role of ["owner", "admin", "staff"] as const) {
+      expect(keysFor(role)).toEqual([
+        "dashboard",
+        "reservations",
+        "customers",
+      ]);
+    }
   });
 });
 

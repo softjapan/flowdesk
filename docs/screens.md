@@ -14,6 +14,7 @@
 | S-07 | 予約カレンダー | `/[org]/reservations` | 日・週表示、スタッフで絞り込み | 全ロール | 9 |
 | S-08 | 予約の作成・編集 | `/[org]/reservations/new`、`/[org]/reservations/[id]` | 顧客・メニュー・スタッフ・日時 | 全ロール | 9 |
 | S-09 | 顧客一覧 | `/[org]/customers` | 検索、ページング、CSV エクスポート | 全ロール | 9・11 |
+| S-17 | 顧客の新規登録 | `/[org]/customers/new` | 入力フォーム（送信処理は第9章） | 全ロール | 6・9 |
 | S-10 | 顧客詳細 | `/[org]/customers/[id]` | 基本情報、写真、予約履歴 | 全ロール | 9・11 |
 | S-11 | メニュー管理 | `/[org]/services` | 一覧と編集 | Owner / Admin | 9 |
 | S-12 | 店舗管理 | `/[org]/locations` | 一覧と編集 | Owner / Admin | 9 |

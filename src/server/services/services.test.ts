@@ -60,6 +60,13 @@ describe("getDashboard", () => {
     expect(d.month.revenueYen).toBeNull();
     expect(d.month.reservationCount).toBeGreaterThan(0);
   });
+
+  it("デモデータの予約は複数の顧客に分かれる", async () => {
+    for (const slug of ["demo-salon", "sakura-seitai"]) {
+      const d = await getDashboard(await contextOf(slug), now);
+      expect(d.month.customerCount).toBeGreaterThan(1);
+    }
+  });
 });
 
 describe("getCalendar", () => {

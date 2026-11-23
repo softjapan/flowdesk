@@ -314,7 +314,9 @@ function buildTemplates(
         day,
         hour: 10 + slot * 2,
         staff: (seed + slot) % staffCount,
-        customer: (seed * 7) % customerCount,
+        // 係数は顧客数と互いに素にする。7 だと、顧客が 7 人の
+        // 組織で全件が同じ顧客に割り当てられていた
+        customer: (seed * 3) % customerCount,
         service: seed % serviceCount,
       });
     }
