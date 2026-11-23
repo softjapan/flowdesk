@@ -31,7 +31,7 @@
 | アイコン | lucide-react | 1.78.0 | shadcn/ui の既定のアイコン |
 | グラフ | recharts | 3.8.0 | shadcn/ui の `chart` 部品が使う。ダッシュボードの予約推移 |
 | 認証 | better-auth | 1.7.27 | Auth.js はメンテナンスがセキュリティ修正のみになり、公式が新規プロジェクトに Better Auth を推奨（nextauthjs/next-auth discussion #13252）。`organization` プラグインでテナントとロールを扱う |
-| 認証 CLI | auth | 1.7.27 | 第7章。Better Auth のテーブルを Prisma スキーマに出力する（`npx auth@1.7.27 generate --config src/server/auth.ts`）。依存には入れず `npx` で版を固定して使う。旧 `@better-auth/cli` は npm で非推奨（最新 1.4.21）で、1.7 系はない |
+| 認証 CLI | auth | 1.7.27 | 第7章。Better Auth のテーブルを Prisma スキーマに出力する（`npx auth@1.7.27 generate --config src/server/auth-cli.ts`）。依存には入れず `npx` で版を固定して使う。旧 `@better-auth/cli` は npm で非推奨（最新 1.4.21）で、1.7 系はない |
 | ORM | prisma / @prisma/client / @prisma/adapter-pg | 7.10.1 | npm の `prisma@latest` は 8.0.0-rc.34（RC）。Better Auth の peer 依存が `^7` までなので 7 系に固定 |
 | DB ドライバ | pg | 8.23.1 | Prisma 7 のドライバアダプター経由で使う |
 | 型定義 | @types/pg | 8.23.1 | dev。テスト用 DB の作成（`test/db-global-setup.ts`）で `pg` を直接使う |
@@ -63,3 +63,4 @@
 15. **Better Auth のパスワード再設定のリンクは `/api/auth/reset-password/:token?callbackURL=...` になる。** Better Auth がトークンを確かめてから `callbackURL`（`/reset-password`）に `?token=` を付けてリダイレクトし、無効・期限切れなら `?error=INVALID_TOKEN` を付ける。クライアントのメソッドは `requestPasswordReset`（旧 `forgetPassword`）（第8章）。
 16. **Better Auth の `secret` が未設定だと、開発では既定の値で動き、`NODE_ENV=production` では初期化が `BetterAuthError`（default secret）で失敗する。** `next build` は失敗せずに終わるがログにこのエラーが出て、起動後の認証の API はすべて失敗する。`.env.local` と本番の環境変数に `BETTER_AUTH_SECRET` と `BETTER_AUTH_URL` を入れる（第8章）。
 17. **シードのパスワードは `better-auth/crypto` の `hashPassword`（scrypt）でハッシュ化し、`account` に `providerId: "credential"` で入れる。** Better Auth のメールアドレスとパスワードのログインはこの行を見る（第8章）。
+18. **Better Auth の設定をモジュールの読み込み時に作ると、`DATABASE_URL` のない環境でビルドが失敗する。** `prismaAdapter` は作る時点で Prisma Client を使うため、遅延させる代理のオブジェクトを渡しても回避できなかった。`createAuth()` / `getAuth()` で最初に使うときに作り、CLI 用の入口（`src/server/auth-cli.ts`）だけが読み込み時に作る。あわせて `getSession` は `headers()` を先に読む（`getAuth().api.getSession({ headers: await headers() })` では、呼び出し先の `getAuth()` が引数より先に評価され、事前描画の時点で接続を作ろうとする）（第8章）。

@@ -9,14 +9,17 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { REQUEST_PATH_HEADER, loginUrlFor } from "@/lib/auth-paths";
-import { auth } from "@/server/auth";
+import { getAuth } from "@/server/auth";
 
 /**
  * 現在のセッション（未ログインなら null）。
  * レイアウトと各ページから呼ばれるので、同じリクエストでは一度だけ取得する
  */
 export const getSession = cache(async function getSession() {
-  return auth.api.getSession({ headers: await headers() });
+  // headers() を先に読む。getAuth() を先に呼ぶと、リクエストに依存する
+  // 処理に入る前（事前描画の時点）で DB の接続を作ろうとする
+  const requestHeaders = await headers();
+  return getAuth().api.getSession({ headers: requestHeaders });
 });
 
 /**
