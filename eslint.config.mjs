@@ -8,7 +8,14 @@ const eslintConfig = defineConfig([
   ...nextTs,
   // 整形は Prettier に任せ、ESLint の整形系ルールを無効にする
   prettier,
-  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
+  globalIgnores([
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+    // Prisma Client の生成物
+    "src/generated/**",
+  ]),
 ]);
 
 export default eslintConfig;

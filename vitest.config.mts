@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
@@ -7,5 +7,10 @@ export default defineConfig({
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
+  },
+  test: {
+    // DB を使うテストは npm run test:db（vitest.db.config.mts）で実行する。
+    // npm test と npm run check は DB なしで通るようにする
+    exclude: [...configDefaults.exclude, "**/*.db.test.ts"],
   },
 });

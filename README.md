@@ -31,11 +31,22 @@ git checkout ch04
 Node.js 24.13.0 と Docker が必要。
 
 ```bash
-npm install                 # prepare スクリプトが Git フックを有効にする
+npm install                 # Git フックの有効化と Prisma Client の生成
 cp .env.example .env.local
 docker compose up -d --wait # PostgreSQL・S3 互換・SQS 互換・メール
+npm run db:migrate          # マイグレーションを適用する
+npm run db:seed             # デモデータを入れる
 npm run dev                 # http://localhost:3000
 ```
+
+| コマンド | 内容 |
+|----------|------|
+| `npm run db:migrate` | `prisma migrate dev`。スキーマの変更から新しいマイグレーションを作って適用する |
+| `npm run db:seed` | 全テーブルを空にしてデモデータを入れ直す。予約は実行した日を基準に作る |
+| `npm run db:reset` | 開発用 DB を作り直し、マイグレーションとシードをやり直す（データはすべて消える） |
+| `npm run test:db` | DB を使うテスト。テスト用 DB（`flowdesk_test`）を自動で作り、毎回シードし直す |
+
+`npm run check` は DB なしで通る（`*.db.test.ts` は含まない）。
 
 | サービス | URL |
 |----------|-----|

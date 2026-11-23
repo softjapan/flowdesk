@@ -1,4 +1,4 @@
-import { DEMO_USER_ID } from "@/server/demo-data";
+import { DEMO_USER_ID } from "@/server/demo-user";
 
 /**
  * ログイン中のユーザー ID。

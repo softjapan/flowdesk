@@ -1,4 +1,4 @@
-import { demoDb } from "@/server/demo-data";
+import { listCustomers as listCustomerRows } from "@/server/repositories/customers";
 import type { OrgContext } from "@/server/services/org-context";
 import {
   firstValue,
@@ -57,7 +57,7 @@ export async function listCustomers(
   params: SearchParams,
 ): Promise<CustomerList> {
   const parsed = parseCustomerListQuery(params);
-  const all = await demoDb.listCustomers(ctx.organizationId);
+  const all = await listCustomerRows(ctx.organizationId);
   const filtered = all
     .map(({ id, name, nameKana, email, phone }) => ({
       id,

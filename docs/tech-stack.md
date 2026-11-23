@@ -31,8 +31,10 @@
 | アイコン | lucide-react | 1.78.0 | shadcn/ui の既定のアイコン |
 | グラフ | recharts | 3.8.0 | shadcn/ui の `chart` 部品が使う。ダッシュボードの予約推移 |
 | 認証 | better-auth | 1.7.27 | Auth.js はメンテナンスがセキュリティ修正のみになり、公式が新規プロジェクトに Better Auth を推奨（nextauthjs/next-auth discussion #13252）。`organization` プラグインでテナントとロールを扱う |
+| 認証 CLI | auth | 1.7.27 | 第7章。Better Auth のテーブルを Prisma スキーマに出力する（`npx auth@1.7.27 generate --config src/server/auth.ts`）。依存には入れず `npx` で版を固定して使う。旧 `@better-auth/cli` は npm で非推奨（最新 1.4.21）で、1.7 系はない |
 | ORM | prisma / @prisma/client / @prisma/adapter-pg | 7.10.1 | npm の `prisma@latest` は 8.0.0-rc.34（RC）。Better Auth の peer 依存が `^7` までなので 7 系に固定 |
 | DB ドライバ | pg | 8.23.1 | Prisma 7 のドライバアダプター経由で使う |
+| 型定義 | @types/pg | 8.23.1 | dev。テスト用 DB の作成（`test/db-global-setup.ts`）で `pg` を直接使う |
 | 検証 | zod | 4.6.7 | |
 | 決済 | stripe | 23.2.0 | テストモードのみ使用 |
 | AWS | @aws-sdk/client-s3 / client-sqs | 3.1175.0 | |
@@ -52,3 +54,8 @@
 7. **shadcn 4.23.0 の `init` は `clsx` と `tailwind-merge` を入れず、`cn` パッケージ（`shadcn-ui/cn`）を入れる。** `src/lib/utils.ts` は `export { cn } from "cn"` だけになり、部品も `"cn"` から直接 import する。CLI のコードに `clsx`・`tailwind-merge` から `cn` へ書き換える処理があることを確認した（第6章）。
 8. **shadcn 4.23.0 の `init` は `globals.css` に `--font-sans: var(--font-sans)` と自己参照で書く。** フォントが効かないので `var(--font-geist-sans)` に直す（第6章）。
 9. **`SidebarMenuSkeleton` は幅を `Math.random()` で決める。** Cache Components ではプリレンダーとハイドレーションで値がずれるので、Suspense の fallback には固定幅の `Skeleton` を使う（第6章）。
+10. **Better Auth の CLI は `auth` パッケージに移った。** `npx @better-auth/cli generate` は非推奨の 1.4 系を取ってくる。better-auth と同じ版の `npx auth@1.7.27 generate` を使う。出力には `docs/er.md` の 6 テーブルに加えて `verification` が含まれる。業務テーブルと、手で足した逆リレーションは再実行しても消えない（第7章）。
+11. **Prisma 7.10 の `prisma init` は設定ファイルを `prisma7.config.ts` という名前で作る。** `prisma.config.ts` も後方互換で読まれるが、`prisma7.config.ts` が優先される。生成されるファイルは `import "dotenv/config"` を前提にしているが、dotenv は追加せず Node 24 の `process.loadEnvFile()` で `.env.local` を読む（第7章）。
+12. **Prisma 7 では `migrate dev` と `migrate reset` がシードを実行しない（`--skip-seed` もない）。** `npm run db:reset` は reset の後に `prisma db seed` を続けて実行する。`migrate dev` は Client も生成しないので、`postinstall` と `db:generate` で `prisma generate` を実行する（第7章）。
+13. **シードを `node prisma/seed.ts` で直接実行するため、generator に `importFileExtension = "ts"` を指定する。** 生成された Client の import に `.ts` が付き、Node 24 の型の除去でそのまま読める。`tsconfig.json` には `allowImportingTsExtensions` を足す（第7章）。
+14. **`npm audit` で、`prisma`（dev）が依存する `effect` に high（ReDoS、Schema.TemplateLiteral）が出る（2026-11-23 時点）。** CLI だけが使い、本番の実行時には入らない。修正版の Prisma 7 が出たら更新する（第7章）。

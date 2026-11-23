@@ -1,5 +1,10 @@
 import { cache } from "react";
-import { demoDb, type Role } from "@/server/demo-data";
+import type { Role } from "@/server/domain";
+import { listLocations } from "@/server/repositories/catalog";
+import {
+  findMember,
+  findOrganizationBySlug,
+} from "@/server/repositories/organizations";
 
 /** 組織の画面で、Service に渡す「誰が・どの組織で」の情報 */
 export type OrgContext = {
@@ -25,11 +30,11 @@ export const getOrgContext = cache(async function getOrgContext(
   slug: string,
   userId: string,
 ): Promise<OrgContext | null> {
-  const organization = await demoDb.findOrganizationBySlug(slug);
+  const organization = await findOrganizationBySlug(slug);
   if (!organization) return null;
-  const member = await demoDb.findMember(organization.id, userId);
+  const member = await findMember(organization.id, userId);
   if (!member) return null;
-  const [location] = await demoDb.listLocations(organization.id);
+  const [location] = await listLocations(organization.id);
   return {
     organizationId: organization.id,
     organizationName: organization.name,

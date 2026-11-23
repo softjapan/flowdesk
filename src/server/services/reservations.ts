@@ -5,7 +5,13 @@ import {
   toZonedYmd,
   zonedToUtc,
 } from "@/lib/datetime";
-import { demoDb, type ReservationStatus } from "@/server/demo-data";
+import type { ReservationStatus } from "@/server/domain";
+import {
+  listServices,
+  listStaffProfiles,
+} from "@/server/repositories/catalog";
+import { listCustomers } from "@/server/repositories/customers";
+import { listReservations } from "@/server/repositories/reservations";
 import type { OrgContext } from "@/server/services/org-context";
 import {
   firstValue,
@@ -69,9 +75,9 @@ export async function getCalendar(
   const parsed = parseCalendarQuery(params, todayYmd);
 
   const [staff, customers, services] = await Promise.all([
-    demoDb.listStaffProfiles(ctx.organizationId),
-    demoDb.listCustomers(ctx.organizationId),
-    demoDb.listServices(ctx.organizationId),
+    listStaffProfiles(ctx.organizationId),
+    listCustomers(ctx.organizationId),
+    listServices(ctx.organizationId),
   ]);
   // 他の組織や存在しないスタッフの ID は、指定なしとして扱う
   const query: CalendarQuery = {
@@ -84,14 +90,10 @@ export async function getCalendar(
   const dayCount = query.view === "day" ? 1 : 7;
   const firstYmd =
     query.view === "day" ? query.date : startOfWeek(query.date);
-  const reservations = await demoDb.listReservations(
-    ctx.organizationId,
-    {
-      from: zonedToUtc(firstYmd, tz),
-      to: zonedToUtc(addDays(firstYmd, dayCount), tz),
-    },
-    now,
-  );
+  const reservations = await listReservations(ctx.organizationId, {
+    from: zonedToUtc(firstYmd, tz),
+    to: zonedToUtc(addDays(firstYmd, dayCount), tz),
+  });
 
   const customerById = new Map(customers.map((c) => [c.id, c]));
   const serviceById = new Map(services.map((s) => [s.id, s]));

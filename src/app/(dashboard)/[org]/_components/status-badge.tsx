@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { ReservationStatus } from "@/server/demo-data";
+import type { ReservationStatus } from "@/server/domain";
 import { statusLabels } from "./status-label";
 
 const variants = {

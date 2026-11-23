@@ -1,0 +1,278 @@
+// テーブル定義は docs/er.md に合わせる。
+// user〜invitation は Better Auth の CLI（npx auth@1.7.27 generate）の出力。
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  // シード（node で直接実行）からも読めるよう、import に .ts を付ける
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String       @id
+  name          String
+  email         String
+  emailVerified Boolean      @default(false)
+  image         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  members       Member[]
+  invitations   Invitation[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id                   String   @id
+  expiresAt            DateTime
+  token                String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  ipAddress            String?
+  userAgent            String?
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeOrganizationId String?
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Organization {
+  id          String       @id
+  name        String
+  slug        String
+  logo        String?
+  createdAt   DateTime
+  metadata    String?
+  members     Member[]
+  invitations Invitation[]
+
+  // 業務テーブルへの逆リレーション（CLI の出力に手で追加）
+  staffProfiles StaffProfile[]
+  locations     Location[]
+  services      Service[]
+  customers     Customer[]
+  reservations  Reservation[]
+  attachments   Attachment[]
+  subscription  Subscription?
+  auditLogs     AuditLog[]
+
+  @@unique([slug])
+  @@map("organization")
+}
+
+model Member {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String       @default("member")
+  createdAt      DateTime
+
+  // 業務テーブルへの逆リレーション（CLI の出力に手で追加）
+  staffProfile StaffProfile?
+
+  @@index([organizationId])
+  @@index([userId])
+  @@map("member")
+}
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           String?
+  status         String       @default("pending")
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  inviterId      String
+  user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([email])
+  @@map("invitation")
+}
+
+// ---------------------------------------------------------------
+// 業務テーブル（docs/er.md）。すべて organizationId を持つ。
+// 組織をまたぐ参照は (organizationId, id) の複合外部キーで DB が拒否する
+// （アプリの絞り込み漏れがあっても、他の組織の顧客で予約を作れない）。
+// 日時は timestamptz で UTC として保存する。
+// ---------------------------------------------------------------
+
+enum ReservationStatus {
+  pending
+  confirmed
+  cancelled
+  done
+}
+
+model StaffProfile {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberId       String        @unique
+  member         Member        @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  displayName    String
+  active         Boolean       @default(true)
+  reservations   Reservation[]
+
+  @@unique([organizationId, id])
+  @@map("staffProfile")
+}
+
+model Location {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  timezone       String        @default("Asia/Tokyo")
+  reservations   Reservation[]
+
+  @@unique([organizationId, id])
+  @@map("location")
+}
+
+model Service {
+  id              String        @id @default(cuid())
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name            String
+  durationMinutes Int
+  priceYen        Int
+  reservations    Reservation[]
+
+  @@unique([organizationId, id])
+  @@map("service")
+}
+
+model Customer {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  nameKana       String
+  email          String
+  phone          String
+  note           String        @default("")
+  /// 論理削除
+  deletedAt      DateTime?     @db.Timestamptz(3)
+  reservations   Reservation[]
+  attachments    Attachment[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, nameKana])
+  @@map("customer")
+}
+
+model Reservation {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  locationId     String
+  location       Location          @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: NoAction)
+  staffProfileId String
+  staffProfile   StaffProfile      @relation(fields: [organizationId, staffProfileId], references: [organizationId, id], onDelete: NoAction)
+  customerId     String
+  customer       Customer          @relation(fields: [organizationId, customerId], references: [organizationId, id], onDelete: NoAction)
+  serviceId      String
+  service        Service           @relation(fields: [organizationId, serviceId], references: [organizationId, id], onDelete: NoAction)
+  startsAt       DateTime          @db.Timestamptz(3)
+  endsAt         DateTime          @db.Timestamptz(3)
+  status         ReservationStatus @default(pending)
+  /// 予約時点の料金を保存する（メニューの値上げで過去の売上が変わらない）
+  priceYen       Int
+  /// 楽観ロック。更新のたびに 1 増やす
+  version        Int               @default(1)
+
+  // 重複予約を防ぐ排他制約は第9章でマイグレーション SQL に追加する
+  @@index([organizationId, startsAt])
+  @@map("reservation")
+}
+
+model Attachment {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer     @relation(fields: [organizationId, customerId], references: [organizationId, id], onDelete: NoAction)
+  s3Key          String       @unique
+  contentType    String
+  sizeBytes      Int
+
+  @@index([organizationId, customerId])
+  @@map("attachment")
+}
+
+model Subscription {
+  id                   String       @id @default(cuid())
+  organizationId       String       @unique
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stripeCustomerId     String?      @unique
+  stripeSubscriptionId String?      @unique
+  /// free | pro
+  plan                 String       @default("free")
+  status               String
+  currentPeriodEnd     DateTime?    @db.Timestamptz(3)
+
+  @@map("subscription")
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorUserId    String
+  /// customer.update など
+  action         String
+  targetType     String
+  targetId       String
+  diff           Json
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+
+  @@index([organizationId, createdAt])
+  @@map("auditLog")
+}

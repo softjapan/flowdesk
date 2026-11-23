@@ -20,7 +20,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import type { Role } from "@/server/demo-data";
+import type { Role } from "@/server/domain";
 import { isActive, navHref, navItemsFor } from "./nav-items";
 
 // アイコン（関数）は Server Component から渡せないので、ここで対応づける

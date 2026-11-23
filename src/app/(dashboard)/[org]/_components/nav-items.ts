@@ -1,4 +1,4 @@
-import type { Role } from "@/server/demo-data";
+import type { Role } from "@/server/domain";
 
 export type NavItem = {
   key: string;

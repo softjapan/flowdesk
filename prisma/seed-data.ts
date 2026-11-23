@@ -1,16 +1,23 @@
 /**
- * DB を導入するまでの固定のデモデータ（第7章で Prisma に置き換える）。
- * テーブルの形は docs/er.md に合わせる。取得関数はすべて organizationId を
- * 引数に取り、ID だけでは取得できないようにしておく。
+ * シードの内容（第5章のデモデータをそのまま DB に入れる）。
+ * テーブルの形は docs/er.md に合わせる。
  *
- * 予約は「今日」を基準にした相対日で定義し、呼び出し時の日付で実体化する。
- * こうしておくと、いつ起動してもダッシュボードの「本日の予約」が空にならない。
+ * 予約は「基準日」からの相対日で定義し、buildSeedData(now) の now の日付で
+ * 実体化する。開発用 DB は投入した日、テスト用 DB は固定の日付を基準にする。
+ *
+ * node で直接実行するので、import は相対パスで .ts まで書く。
  */
-import { addDays, toZonedYmd, zonedToUtc } from "@/lib/datetime";
-
-export type Role = "owner" | "admin" | "staff";
-export type ReservationStatus =
-  "pending" | "confirmed" | "cancelled" | "done";
+import {
+  addDays,
+  toZonedYmd,
+  zonedToUtc,
+} from "../src/lib/datetime.ts";
+import type {
+  ReservationStatus,
+  Role,
+} from "../src/server/domain.ts";
+import { DEMO_USER_ID } from "../src/server/demo-user.ts";
+import type { PrismaClient } from "../src/generated/prisma/client.ts";
 
 export type Organization = { id: string; name: string; slug: string };
 export type Member = {
@@ -62,9 +69,6 @@ export type Reservation = {
   priceYen: number;
   version: number;
 };
-
-/** 認証（第8章）までの仮のログインユーザー */
-export const DEMO_USER_ID = "user_demo";
 
 const organizations: Organization[] = [
   { id: "org_a", name: "デモサロン", slug: "demo-salon" },
@@ -348,7 +352,7 @@ function materializeReservations(
   const orgServices = services.filter(
     (s) => s.organizationId === organizationId,
   );
-  return templates.map((t, i) => {
+  return templates.map((t, i): Reservation => {
     const service = orgServices[t.service]!;
     const startsAt = zonedToUtc(
       addDays(todayYmd, t.day),
@@ -379,65 +383,104 @@ const reservationTemplates: Record<string, ReservationTemplate[]> = {
   org_c: buildTemplates(-5, 5, 1, 4, 1),
 };
 
-function reservationsOf(organizationId: string, now: Date) {
-  const location = locations.find(
-    (l) => l.organizationId === organizationId,
+export type User = { id: string; name: string; email: string };
+
+const userNames: Record<string, string> = {
+  [DEMO_USER_ID]: "デモ ユーザー",
+  user_a1: "佐藤 一郎",
+  user_a2: "鈴木 次郎",
+  user_a3: "高橋 三郎",
+  user_b0: "桜井 桜",
+  user_c0: "伊藤 四郎",
+};
+
+export type SeedData = {
+  users: User[];
+  organizations: Organization[];
+  members: Member[];
+  staffProfiles: StaffProfile[];
+  locations: Location[];
+  services: Service[];
+  customers: Customer[];
+  reservations: Reservation[];
+};
+
+/** now の日付（各組織の店舗のタイムゾーン）を基準に、投入する行を組み立てる */
+export function buildSeedData(now: Date): SeedData {
+  const users = [...new Set(members.map((m) => m.userId))].map(
+    (id) => ({
+      id,
+      name: userNames[id] ?? id,
+      email: `${id.replace(/_/g, "-")}@example.com`,
+    }),
   );
-  const templates = reservationTemplates[organizationId];
-  if (!location || !templates) return [];
-  const todayYmd = toZonedYmd(now, location.timezone);
-  return materializeReservations(organizationId, templates, todayYmd);
+  const reservations = organizations.flatMap((o) => {
+    const location = locations.find(
+      (l) => l.organizationId === o.id,
+    )!;
+    const templates = reservationTemplates[o.id] ?? [];
+    const todayYmd = toZonedYmd(now, location.timezone);
+    return materializeReservations(o.id, templates, todayYmd);
+  });
+  return {
+    users,
+    organizations,
+    members,
+    staffProfiles,
+    locations,
+    services,
+    customers,
+    reservations,
+  };
 }
 
+/** シードが空にするテーブル（Better Auth のテーブルも含む） */
+const tables = [
+  "auditLog",
+  "subscription",
+  "attachment",
+  "reservation",
+  "customer",
+  "service",
+  "location",
+  "staffProfile",
+  "invitation",
+  "member",
+  "organization",
+  "verification",
+  "account",
+  "session",
+  "user",
+];
+
 /**
- * デモデータの取得口。Prisma に置き換えるときも、同じく organizationId で
- * 絞り込む形を保つ。
+ * 全テーブルを空にしてから投入する。何度実行しても同じ状態になる。
+ * 開発用・テスト用の DB 専用（本番では実行しない）。
  */
-export const demoDb = {
-  async findOrganizationBySlug(slug: string) {
-    return organizations.find((o) => o.slug === slug) ?? null;
-  },
-  async findMember(organizationId: string, userId: string) {
-    return (
-      members.find(
-        (m) =>
-          m.organizationId === organizationId && m.userId === userId,
-      ) ?? null
-    );
-  },
-  async listLocations(organizationId: string) {
-    return locations.filter(
-      (l) => l.organizationId === organizationId,
-    );
-  },
-  async listStaffProfiles(organizationId: string) {
-    return staffProfiles.filter(
-      (s) => s.organizationId === organizationId && s.active,
-    );
-  },
-  async listServices(organizationId: string) {
-    return services.filter(
-      (s) => s.organizationId === organizationId,
-    );
-  },
-  /** 論理削除済みは含めない */
-  async listCustomers(organizationId: string) {
-    return customers.filter(
-      (c) => c.organizationId === organizationId && !c.deletedAt,
-    );
-  },
-  /** startsAt が [from, to) の予約 */
-  async listReservations(
-    organizationId: string,
-    range: { from: Date; to: Date },
-    now: Date,
-  ) {
-    return reservationsOf(organizationId, now)
-      .filter(
-        (r) =>
-          r.startsAt.getTime() >= range.from.getTime() &&
-          r.startsAt.getTime() < range.to.getTime(),
-      )
-      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
-  },
-};
+export async function seedDatabase(
+  prisma: PrismaClient,
+  now: Date,
+): Promise<void> {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("本番環境ではシードを実行しない");
+  }
+  const data = buildSeedData(now);
+  const createdAt = new Date("2026-01-01T00:00:00Z");
+  await prisma.$transaction([
+    prisma.$executeRawUnsafe(
+      `TRUNCATE TABLE ${tables.map((t) => `"${t}"`).join(", ")} CASCADE`,
+    ),
+    prisma.user.createMany({ data: data.users }),
+    prisma.organization.createMany({
+      data: data.organizations.map((o) => ({ ...o, createdAt })),
+    }),
+    prisma.member.createMany({
+      data: data.members.map((m) => ({ ...m, createdAt })),
+    }),
+    prisma.staffProfile.createMany({ data: data.staffProfiles }),
+    prisma.location.createMany({ data: data.locations }),
+    prisma.service.createMany({ data: data.services }),
+    prisma.customer.createMany({ data: data.customers }),
+    prisma.reservation.createMany({ data: data.reservations }),
+  ]);
+}

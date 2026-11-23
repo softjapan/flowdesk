@@ -5,7 +5,13 @@ import {
   toZonedYmd,
   zonedToUtc,
 } from "@/lib/datetime";
-import { demoDb, type ReservationStatus } from "@/server/demo-data";
+import type { ReservationStatus } from "@/server/domain";
+import {
+  listServices,
+  listStaffProfiles,
+} from "@/server/repositories/catalog";
+import { listCustomers } from "@/server/repositories/customers";
+import { listReservations } from "@/server/repositories/reservations";
 import type { OrgContext } from "@/server/services/org-context";
 
 export const TREND_DAYS = 14;
@@ -55,19 +61,17 @@ export async function getDashboard(
 
   const [monthly, recent, customers, services, staff] =
     await Promise.all([
-      demoDb.listReservations(
-        ctx.organizationId,
-        { from: monthFrom, to: monthTo },
-        now,
-      ),
-      demoDb.listReservations(
-        ctx.organizationId,
-        { from: trendFrom, to: tomorrow },
-        now,
-      ),
-      demoDb.listCustomers(ctx.organizationId),
-      demoDb.listServices(ctx.organizationId),
-      demoDb.listStaffProfiles(ctx.organizationId),
+      listReservations(ctx.organizationId, {
+        from: monthFrom,
+        to: monthTo,
+      }),
+      listReservations(ctx.organizationId, {
+        from: trendFrom,
+        to: tomorrow,
+      }),
+      listCustomers(ctx.organizationId),
+      listServices(ctx.organizationId),
+      listStaffProfiles(ctx.organizationId),
     ]);
 
   const active = monthly.filter((r) => r.status !== "cancelled");

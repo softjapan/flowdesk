@@ -1,4 +1,4 @@
-import type { ReservationStatus } from "@/server/demo-data";
+import type { ReservationStatus } from "@/server/domain";
 
 export const statusLabels: Record<ReservationStatus, string> = {
   pending: "仮予約",
