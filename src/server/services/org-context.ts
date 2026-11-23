@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { demoDb, type Role } from "@/server/demo-data";
 
 /** 組織の画面で、Service に渡す「誰が・どの組織で」の情報 */
@@ -16,8 +17,11 @@ export type OrgContext = {
  * スラッグから組織を引き、ユーザーがそのメンバーであることを確かめる。
  * 組織が存在しない場合とメンバーでない場合は、どちらも null を返す
  * （呼び出し側で 404 にし、組織の存在を漏らさない）。
+ *
+ * レイアウトと各ページから呼ばれるので、React の cache で包み、
+ * 同じリクエストの中では一度だけ実行する。
  */
-export async function getOrgContext(
+export const getOrgContext = cache(async function getOrgContext(
   slug: string,
   userId: string,
 ): Promise<OrgContext | null> {
@@ -35,4 +39,4 @@ export async function getOrgContext(
     role: member.role,
     timezone: location?.timezone ?? "Asia/Tokyo",
   };
-}
+});
