@@ -24,6 +24,54 @@ export async function findReservation(
   return db.reservation.findFirst({ where: { id, organizationId } });
 }
 
+export type NewReservation = {
+  locationId: string;
+  staffProfileId: string;
+  customerId: string;
+  serviceId: string;
+  startsAt: Date;
+  endsAt: Date;
+  status: ReservationStatus;
+  priceYen: number;
+};
+
+/**
+ * 同じスタッフで時間が重なると、DB の排他制約 reservation_no_overlap で
+ * 失敗する（isReservationOverlapError で判定する）
+ */
+export async function createReservation(
+  organizationId: string,
+  data: NewReservation,
+  db: Db = getPrisma(),
+) {
+  return db.reservation.create({ data: { ...data, organizationId } });
+}
+
+/**
+ * 排他制約 reservation_no_overlap の違反か。Prisma 7 のドライバアダプター
+ * 経由では PrismaClientKnownRequestError の meta.driverAdapterError.cause
+ * に PostgreSQL のエラーコード（23P01）とメッセージが入る。
+ */
+export function isReservationOverlapError(error: unknown): boolean {
+  const cause = (
+    error as {
+      meta?: {
+        driverAdapterError?: {
+          cause?: {
+            originalCode?: unknown;
+            originalMessage?: unknown;
+          };
+        };
+      };
+    }
+  )?.meta?.driverAdapterError?.cause;
+  return (
+    cause?.originalCode === "23P01" &&
+    typeof cause.originalMessage === "string" &&
+    cause.originalMessage.includes("reservation_no_overlap")
+  );
+}
+
 /** 楽観ロックで更新できる列（organizationId・id・version は変えさせない） */
 export type ReservationChanges = Partial<{
   locationId: string;

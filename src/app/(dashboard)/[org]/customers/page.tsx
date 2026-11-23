@@ -85,7 +85,12 @@ export default async function CustomersPage({
             {list.items.map((c) => (
               <TableRow key={c.id}>
                 <TableCell className="font-medium">
-                  {c.name}
+                  <Link
+                    href={`/${ctx.slug}/customers/${c.id}`}
+                    className="underline-offset-4 hover:underline"
+                  >
+                    {c.name}
+                  </Link>
                 </TableCell>
                 <TableCell>{c.nameKana}</TableCell>
                 <TableCell className="tabular-nums">

@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { getOrgContext } from "@/server/services/org-context";
 import { getCurrentUserId } from "@/server/session";
 import { CustomerForm } from "../_components/customer-form";
+import { createCustomerAction } from "../actions";
 
-// 顧客の新規登録（送信処理は第9章で追加する）
+// S-17 顧客の新規登録（作成は全ロールに許可。docs/authz-matrix.md）
 export default async function NewCustomerPage({
   params,
 }: PageProps<"/[org]/customers/new">) {
@@ -25,7 +26,10 @@ export default async function NewCustomerPage({
       <h1 id="form-title" className="text-xl font-semibold">
         顧客の新規登録
       </h1>
-      <CustomerForm />
+      <CustomerForm
+        action={createCustomerAction.bind(null, ctx.slug)}
+        submitLabel="登録する"
+      />
     </div>
   );
 }

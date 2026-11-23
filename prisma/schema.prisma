@@ -228,7 +228,8 @@ model Reservation {
   /// 楽観ロック。更新のたびに 1 増やす
   version        Int               @default(1)
 
-  // 重複予約を防ぐ排他制約は第9章でマイグレーション SQL に追加する
+  // 重複予約を防ぐ排他制約 reservation_no_overlap はスキーマで表せないので
+  // マイグレーション SQL（20261123124219_reservation_exclusion）で追加している
   @@index([organizationId, startsAt])
   @@map("reservation")
 }

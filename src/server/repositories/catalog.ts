@@ -25,6 +25,42 @@ export async function listStaffProfiles(
   });
 }
 
+/** 無効なスタッフも返す（呼び出し側で active を見る） */
+export async function findStaffProfile(
+  organizationId: string,
+  id: string,
+  db: Db = getPrisma(),
+) {
+  return db.staffProfile.findFirst({ where: { id, organizationId } });
+}
+
+/** メンバー自身のスタッフ情報（Staff が「自分の担当」かを判定する） */
+export async function findStaffProfileByMember(
+  organizationId: string,
+  memberId: string,
+  db: Db = getPrisma(),
+) {
+  return db.staffProfile.findFirst({
+    where: { organizationId, memberId },
+  });
+}
+
+export async function findLocation(
+  organizationId: string,
+  id: string,
+  db: Db = getPrisma(),
+) {
+  return db.location.findFirst({ where: { id, organizationId } });
+}
+
+export async function findService(
+  organizationId: string,
+  id: string,
+  db: Db = getPrisma(),
+) {
+  return db.service.findFirst({ where: { id, organizationId } });
+}
+
 export async function listServices(
   organizationId: string,
   db: Db = getPrisma(),

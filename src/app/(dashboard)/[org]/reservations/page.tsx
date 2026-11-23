@@ -1,3 +1,4 @@
+import { Plus } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -53,7 +54,16 @@ export default async function ReservationsPage({
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">予約カレンダー</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold">予約カレンダー</h1>
+        {/* 予約の作成は全ロールに許可（Staff は自分の担当のみ） */}
+        <Button asChild>
+          <Link href={`/${ctx.slug}/reservations/new`}>
+            <Plus aria-hidden="true" />
+            予約を作成
+          </Link>
+        </Button>
+      </div>
 
       <div className="flex flex-wrap items-end gap-4">
         <nav aria-label="表示の切り替え" className="flex gap-1">
@@ -153,8 +163,13 @@ export default async function ReservationsPage({
                       }
                     >
                       <TableCell className="tabular-nums">
-                        {formatTime(r.startsAt, timezone)}〜
-                        {formatTime(r.endsAt, timezone)}
+                        <Link
+                          href={`/${ctx.slug}/reservations/${r.id}`}
+                          className="underline-offset-4 hover:underline"
+                        >
+                          {formatTime(r.startsAt, timezone)}〜
+                          {formatTime(r.endsAt, timezone)}
+                        </Link>
                       </TableCell>
                       <TableCell>{r.customerName}</TableCell>
                       <TableCell>{r.serviceName}</TableCell>

@@ -1,18 +1,13 @@
+"use client";
+
+import { useActionState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-
-/** docs/er.md の customer に合わせた入力項目 */
-export type CustomerFieldName =
-  "name" | "nameKana" | "phone" | "email" | "note";
-
-export type CustomerFormErrors = {
-  /** フォーム全体のエラー（保存に失敗したなど） */
-  form?: string;
-  fields?: Partial<Record<CustomerFieldName, string>>;
-};
+import type { CustomerFieldName } from "@/server/validation/customer";
+import type { CustomerFormState } from "../actions";
 
 type FieldDef = {
   name: CustomerFieldName;
@@ -23,7 +18,10 @@ type FieldDef = {
   multiline?: boolean;
 };
 
-// 必須の範囲は仮。第9章で Zod のスキーマを作るときに合わせる
+const EITHER_HINT =
+  "電話番号とメールアドレスは、どちらか一方の入力が必要です。";
+
+// 必須の範囲は src/server/validation/customer.ts のスキーマに合わせる
 const fields: FieldDef[] = [
   { name: "name", label: "氏名", required: true },
   {
@@ -37,18 +35,26 @@ const fields: FieldDef[] = [
     label: "電話番号",
     required: false,
     type: "tel",
-    hint: "ハイフンはあってもなくてもかまいません。",
+    hint: `ハイフンはあってもなくてもかまいません。${EITHER_HINT}`,
   },
-  { name: "email", label: "メール", required: false, type: "email" },
+  {
+    name: "email",
+    label: "メール",
+    required: false,
+    type: "email",
+    hint: EITHER_HINT,
+  },
   { name: "note", label: "メモ", required: false, multiline: true },
 ];
 
 function Field({
   field,
   error,
+  defaultValue,
 }: {
   field: FieldDef;
   error: string | undefined;
+  defaultValue: string;
 }) {
   const id = `customer-${field.name}`;
   const hintId = `${id}-hint`;
@@ -61,6 +67,7 @@ function Field({
   const common = {
     id,
     name: field.name,
+    defaultValue,
     required: field.required,
     "aria-required": field.required || undefined,
     "aria-invalid": error ? true : undefined,
@@ -101,22 +108,36 @@ function Field({
 }
 
 /**
- * 顧客の登録フォーム（画面のみ）。送信処理は第9章で Server Action をつなぐ。
- * errors は Server Action の戻り値をそのまま渡せる形にしておく。
+ * 顧客の登録・編集フォーム。action は slug（と id）を bind した
+ * Server Action（../actions.ts）を受け取る。
  */
 export function CustomerForm({
-  errors = {},
+  action,
+  initialValues = {},
+  submitLabel,
 }: {
-  errors?: CustomerFormErrors;
+  action: (
+    prev: CustomerFormState,
+    formData: FormData,
+  ) => Promise<CustomerFormState>;
+  initialValues?: Partial<Record<CustomerFieldName, string>>;
+  submitLabel: string;
 }) {
-  const fieldErrors = errors.fields ?? {};
+  const [state, formAction, pending] = useActionState(action, {});
+  const fieldErrors = state.fields ?? {};
+  const values = state.values ?? initialValues;
+  // 同じメッセージ（「どちらか一方」など）はまとめに 1 回だけ出す
   const messages = [
-    errors.form,
-    ...fields.map((f) => fieldErrors[f.name]),
-  ].filter((m): m is string => Boolean(m));
+    ...new Set(
+      [state.form, ...fields.map((f) => fieldErrors[f.name])].filter(
+        (m): m is string => Boolean(m),
+      ),
+    ),
+  ];
 
   return (
     <form
+      action={formAction}
       className="grid max-w-xl gap-6"
       aria-labelledby="form-title"
     >
@@ -136,6 +157,9 @@ export function CustomerForm({
           </div>
         )}
       </div>
+      <p role="status" className="text-sm">
+        {state.notice}
+      </p>
 
       <p className="text-sm text-muted-foreground">
         「必須」の項目は入力が必要です。
@@ -146,17 +170,14 @@ export function CustomerForm({
           key={field.name}
           field={field}
           error={fieldErrors[field.name]}
+          defaultValue={values[field.name] ?? ""}
         />
       ))}
 
       <div className="flex items-center gap-3">
-        {/* 送信先がまだないので押せないようにしておく（第9章でつなぐ） */}
-        <Button type="submit" disabled aria-describedby="submit-note">
-          登録する
+        <Button type="submit" disabled={pending}>
+          {pending ? "保存しています…" : submitLabel}
         </Button>
-        <p id="submit-note" className="text-xs text-muted-foreground">
-          登録処理は準備中です。
-        </p>
       </div>
     </form>
   );
