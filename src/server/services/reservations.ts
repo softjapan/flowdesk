@@ -33,6 +33,13 @@ import {
   canManageAllReservations,
   canManageReservation,
 } from "@/server/services/authz";
+import {
+  createJob,
+  dispatchJobs,
+  JOB_TYPES,
+  reservationMailJob,
+  type Dispatch,
+} from "@/server/services/jobs";
 import type { OrgContext } from "@/server/services/org-context";
 import { fail, ok, type Result } from "@/server/services/result";
 import type { ReservationInput } from "@/server/validation/reservation";
@@ -309,11 +316,44 @@ async function translateOverlap<T>(
 
 const auditTarget = "reservation";
 
+/**
+ * 確定（confirmed）になった予約の確定メールを、変更と同じトランザクションで
+ * 依頼する（F-13）。送信は Worker が行う。日時を変えて確定し直したときは
+ * 新しい日時で 1 通送る（同じ日時なら 2 通目は積まれない）
+ */
+async function createConfirmedMailJob(
+  organizationId: string,
+  reservation: { id: string; startsAt: Date },
+  tx: Db,
+): Promise<string> {
+  return createJob(
+    reservationMailJob(
+      JOB_TYPES.reservationConfirmed,
+      organizationId,
+      reservation.id,
+      reservation.startsAt,
+    ),
+    tx,
+  );
+}
+
+/** コミットした後にキューへ送る（送れなくても Worker が送り直す） */
+async function dispatchAfterCommit<T>(
+  result: Result<T>,
+  jobIds: string[],
+  dispatch: Dispatch,
+): Promise<Result<T>> {
+  if (result.ok) await dispatch(jobIds);
+  return result;
+}
+
 export async function createReservation(
   ctx: OrgContext,
   input: ReservationInput,
+  dispatch: Dispatch = dispatchJobs,
 ): Promise<Result<{ id: string }>> {
-  return translateOverlap(() =>
+  const jobIds: string[] = [];
+  const result = await translateOverlap(() =>
     runInTransaction(async (tx) => {
       const org = ctx.organizationId;
       // 他の組織の ID は、組織で絞り込んだ検索で見つからず not_found になる
@@ -368,9 +408,13 @@ export async function createReservation(
         },
         tx,
       );
+      if (row.status === "confirmed") {
+        jobIds.push(await createConfirmedMailJob(org, row, tx));
+      }
       return ok({ id: row.id });
     }),
   );
+  return dispatchAfterCommit(result, jobIds, dispatch);
 }
 
 type AuditValue = string | number;
@@ -402,8 +446,10 @@ export async function updateReservation(
   id: string,
   expectedVersion: number,
   input: ReservationInput,
+  dispatch: Dispatch = dispatchJobs,
 ): Promise<Result<{ id: string; version: number }>> {
-  return translateOverlap(() =>
+  const jobIds: string[] = [];
+  const result = await translateOverlap(() =>
     runInTransaction(async (tx) => {
       const org = ctx.organizationId;
       const current = await findReservation(org, id, tx);
@@ -498,9 +544,19 @@ export async function updateReservation(
         },
         tx,
       );
-      return ok({ id, version: result.reservation.version });
+      const updated = result.reservation;
+      // 確定にした、または確定のまま日時を変えたときに知らせる
+      if (
+        updated.status === "confirmed" &&
+        (changes.status !== undefined ||
+          changes.startsAt !== undefined)
+      ) {
+        jobIds.push(await createConfirmedMailJob(org, updated, tx));
+      }
+      return ok({ id, version: updated.version });
     }),
   );
+  return dispatchAfterCommit(result, jobIds, dispatch);
 }
 
 export async function cancelReservation(

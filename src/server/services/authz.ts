@@ -28,6 +28,21 @@ export function canDeleteCustomer(role: Role): boolean {
   return can(role, { customer: ["delete"] });
 }
 
+/** 顧客／CSV エクスポート：Owner・Admin（個人情報の一括持ち出しになるため） */
+export function canExportCustomers(role: Role): boolean {
+  return can(role, { customer: ["export"] });
+}
+
+/** 添付ファイル／アップロード：全ロール可 */
+export function canUploadAttachment(role: Role): boolean {
+  return can(role, { attachment: ["upload"] });
+}
+
+/** 添付ファイル／閲覧：全ロール可 */
+export function canReadAttachment(role: Role): boolean {
+  return can(role, { attachment: ["read"] });
+}
+
 /** 予約をすべて操作できる（担当を問わない）か */
 export function canManageAllReservations(role: Role): boolean {
   return can(role, { reservation: ["manageAll"] });

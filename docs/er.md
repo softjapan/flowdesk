@@ -24,6 +24,8 @@ erDiagram
     customer ||--o{ reservation : books
     service ||--o{ reservation : for
     customer ||--o{ attachment : has
+    organization ||--o{ customerExport : has
+    organization ||--o{ job : has
 
     organization {
         string id PK
@@ -83,9 +85,34 @@ erDiagram
         string id PK
         string organizationId FK
         string customerId FK
-        string s3Key
+        string s3Key "サーバーが決める"
+        string fileName
         string contentType
         int sizeBytes
+        string status "pending | uploaded"
+        string uploadedByUserId
+        datetime createdAt
+    }
+    customerExport {
+        string id PK
+        string organizationId FK
+        string requestedByUserId
+        string status "pending | done | failed"
+        string s3Key
+        int rowCount
+        datetime createdAt
+        datetime completedAt
+    }
+    job {
+        string id PK
+        string organizationId FK "組織に属さないメールは null"
+        string type "mail.send など"
+        json payload
+        string idempotencyKey UK
+        string status "queued | running | succeeded | failed"
+        int attempts
+        datetime lockedUntil
+        datetime publishedAt
     }
     subscription {
         string id PK
@@ -109,6 +136,14 @@ erDiagram
 ```
 
 メンバーを削除しても `staffProfile` は消さない（担当した予約の履歴が `(organizationId, staffProfileId)` で参照しているため）。`memberId` は `ON DELETE SET NULL` で null になり、`active` を false にする（第10章、マイグレーション `20261124123959_staff_profile_keep_on_member_removal`）。
+
+## 非同期ジョブ（第11章、マイグレーション `20261124150000_uploads_exports_jobs`）
+
+- `job` は SQS に送るジョブの中身（Transactional Outbox）。業務の変更（予約の確定・招待・エクスポートの依頼）と同じトランザクションで作り、コミットした後に `{ jobId }` だけを SQS に送る。送れなかったものは Worker が 1 分ごとに拾って送り直す
+- `idempotencyKey` の一意制約で、同じ依頼は 1 件にまとまる（例：`reservation.confirmed:{予約ID}:{開始日時}`）。Worker は条件付きの UPDATE で `queued` を `running` にしてから処理するので、同じメッセージが 2 回届いても処理は 1 回
+- 3 回失敗すると `failed` になり、メッセージは DLQ に移る（`docker/elasticmq.conf`）
+- `job` は Worker がすべての組織について処理するため ID で引く。組織のデータは payload の `organizationId` で絞り込んで読む
+- 送ったメールの本文（パスワード再設定のリンクなど）は、送信後に `payload` から消す
 
 ## テナント分離の方式（第10章）
 

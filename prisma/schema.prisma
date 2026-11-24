@@ -89,14 +89,16 @@ model Organization {
   invitations Invitation[]
 
   // 業務テーブルへの逆リレーション（CLI の出力に手で追加）
-  staffProfiles StaffProfile[]
-  locations     Location[]
-  services      Service[]
-  customers     Customer[]
-  reservations  Reservation[]
-  attachments   Attachment[]
-  subscription  Subscription?
-  auditLogs     AuditLog[]
+  staffProfiles   StaffProfile[]
+  locations       Location[]
+  services        Service[]
+  customers       Customer[]
+  reservations    Reservation[]
+  attachments     Attachment[]
+  subscription    Subscription?
+  auditLogs       AuditLog[]
+  customerExports CustomerExport[]
+  jobs            Job[]
 
   @@unique([slug])
   @@map("organization")
@@ -235,18 +237,89 @@ model Reservation {
   @@map("reservation")
 }
 
-model Attachment {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  customerId     String
-  customer       Customer     @relation(fields: [organizationId, customerId], references: [organizationId, id], onDelete: NoAction)
-  s3Key          String       @unique
-  contentType    String
-  sizeBytes      Int
+enum AttachmentStatus {
+  /// 署名付き URL を発行した（ブラウザからの PUT がまだ終わっていない）
+  pending
+  /// S3 にオブジェクトがあり、サイズと形式を確かめた
+  uploaded
+}
 
+/// 顧客の写真・添付ファイル（F-12）。本体は S3 に置き、ここには鍵と属性だけを持つ
+model Attachment {
+  id               String           @id @default(cuid())
+  organizationId   String
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId       String
+  customer         Customer         @relation(fields: [organizationId, customerId], references: [organizationId, id], onDelete: NoAction)
+  s3Key            String           @unique
+  /// 利用者が選んだファイル名（表示とダウンロード時の名前。S3 の鍵には使わない）
+  fileName         String
+  contentType      String
+  sizeBytes        Int
+  status           AttachmentStatus @default(pending)
+  uploadedByUserId String
+  createdAt        DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@unique([organizationId, id])
   @@index([organizationId, customerId])
   @@map("attachment")
+}
+
+enum CustomerExportStatus {
+  pending
+  done
+  failed
+}
+
+/// 顧客一覧の CSV エクスポート（F-11）。Worker が CSV を作って S3 に置く
+model CustomerExport {
+  id                String               @id @default(cuid())
+  organizationId    String
+  organization      Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requestedByUserId String
+  status            CustomerExportStatus @default(pending)
+  s3Key             String?
+  rowCount          Int?
+  createdAt         DateTime             @default(now()) @db.Timestamptz(3)
+  completedAt       DateTime?            @db.Timestamptz(3)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, createdAt])
+  @@map("customerExport")
+}
+
+enum JobStatus {
+  queued
+  running
+  succeeded
+  failed
+}
+
+/// 非同期ジョブ（Worker が処理する）。SQS のメッセージには id だけを載せ、
+/// 中身はここに置く（Transactional Outbox。業務の変更と同じトランザクションで作る）。
+/// idempotencyKey で同じ依頼を 1 件にまとめ、status で二重の処理を防ぐ
+model Job {
+  id             String        @id @default(cuid())
+  /// パスワード再設定のメールなど、組織に属さないジョブは null
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// mail.send・reservation.confirmed・reservation.reminder・customer.export
+  type           String
+  payload        Json
+  idempotencyKey String        @unique
+  status         JobStatus     @default(queued)
+  /// 処理を始めた回数（3 回失敗すると failed。SQS はデッドレターキューへ移す）
+  attempts       Int           @default(0)
+  /// running の間、この時刻までは他の Worker が処理しない
+  lockedUntil    DateTime?     @db.Timestamptz(3)
+  lastError      String?
+  /// 最後に SQS へ送った日時（null なら未送信。Worker が拾い直して送る）
+  publishedAt    DateTime?     @db.Timestamptz(3)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+  completedAt    DateTime?     @db.Timestamptz(3)
+
+  @@index([status, createdAt])
+  @@map("job")
 }
 
 model Subscription {

@@ -18,7 +18,9 @@ export type Failure =
   /** 招待しようとした相手が、すでに組織のメンバー */
   | "already_member"
   /** 組織の URL（スラッグ）が使われている */
-  | "slug_taken";
+  | "slug_taken"
+  /** S3 にファイルがない、または申告と形式・サイズが違う */
+  | "upload_mismatch";
 
 export type Result<T> =
   { ok: true; value: T } | { ok: false; reason: Failure };

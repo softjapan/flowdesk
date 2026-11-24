@@ -7,6 +7,7 @@
  * サーバー側でのセッションの取得は src/server/session.ts から行う。
  * ロール（owner・admin・staff）は src/server/access-control.ts で定義する。
  */
+import { randomUUID } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
@@ -18,7 +19,7 @@ import {
 } from "@/lib/password-policy";
 import { buildResetPasswordMail } from "@/server/auth-mails";
 import { getPrisma } from "@/server/db";
-import { sendMail } from "@/server/mail";
+import { enqueueMail } from "@/server/services/jobs";
 
 const RESET_PASSWORD_EXPIRES_IN_SECONDS = 60 * 60;
 
@@ -65,17 +66,23 @@ export function createAuth() {
       // 再設定したら、他の端末に残っているセッションもすべて無効にする
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, url }) => {
-        // 送信を待つと、登録済みのアドレスかどうかが応答時間から
-        // 分かってしまうので、待たずに返す。失敗はログに残す
-        void sendMail(
+        // 送信は Worker が行う（第11章）。ここではジョブを積むだけだが、
+        // 登録済みのアドレスかどうかが応答時間から分からないよう、
+        // 積むのも待たずに返す。失敗はログに残す
+        void enqueueMail(
           buildResetPasswordMail({
             to: user.email,
             name: user.name,
             url,
             expiresInMinutes: RESET_PASSWORD_EXPIRES_IN_SECONDS / 60,
           }),
+          // 再設定の依頼ごとに 1 通（リンクの URL は DB に置き、送ったら消す）
+          {
+            key: `password-reset:${randomUUID()}`,
+            organizationId: null,
+          },
         ).catch((error: unknown) => {
-          console.error("パスワード再設定メールの送信に失敗", error);
+          console.error("パスワード再設定メールの依頼に失敗", error);
         });
       },
     },

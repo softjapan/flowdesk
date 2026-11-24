@@ -38,7 +38,9 @@
 | メール | nodemailer | 10.6.1 | 第8章。SMTP でメールを送る（ローカルは Mailpit、本番は SES の SMTP）。型定義を同梱するので `@types/nodemailer` は入れない |
 | 検証 | zod | 4.6.7 | |
 | 決済 | stripe | 23.2.0 | テストモードのみ使用 |
-| AWS | @aws-sdk/client-s3 / client-sqs | 3.1175.0 | |
+| AWS | @aws-sdk/client-s3 / client-sqs | 3.1175.0 | 第11章。S3（添付ファイル・CSV）と SQS（ジョブのキュー） |
+| AWS | @aws-sdk/s3-request-presigner | 3.1175.0 | 第11章。S3 の署名付き URL（ブラウザから直接 PUT・GET、有効期限 5 分）。client-s3 と同じ版にそろえる |
+| 実行 | tsx | 4.23.15 | 第11章。Worker（`npm run worker`）とスクリプト（`npm run aws:setup`）を TypeScript のまま動かす。Node 24 の型の除去だけでは `@/` の import（tsconfig の paths）を解決できないため。本番の Worker も使うので dependencies に入れる |
 | Lint | eslint / eslint-config-next | 9.39.5 / 16.4.6 | テンプレートは ESLint 9（`latest` は 10 だが合わせない） |
 | 整形 | prettier | 3.10.1 | A5 判の誌面に収めるため `printWidth: 70` |
 | 単体テスト | vitest | 5.1.1 | |
@@ -67,3 +69,8 @@
 19. **organization プラグインに `roles` を渡しても、既定の `member` ロールは消えない。** `update-member-role` などはロール名を「既定の 3 つ（owner・admin・member）＋ `roles` のキー」で検証するため、`member` を指定すると通ってしまう。FlowDesk では `member.role` を `toRole()` で owner・admin・staff 以外なら権限なしとして扱い、組織・メンバーを変更する HTTP の入口は `disabledPaths` で閉じる（第10章）。
 20. **Better Auth の `disabledPaths` は HTTP のリクエストだけを止める。** ルーターの `onRequest` でパスを比べて 404 を返すので、サーバーからの `getAuth().api.*` の呼び出しは止まらない（第10章）。
 21. **organization プラグインの `update-member-role` の既定の判定は、権限の表より緩い。** Owner 以外が Owner を扱うことは拒否するが、`member: ["update"]` を持つ Admin は Admin を Staff に、`remove-member` では Admin を削除できる。また監査ログを残すフック（`afterUpdateMemberRole`）は変更と同じトランザクションにならない。FlowDesk はこれらを使わず Service 層で判定する（第10章）。
+22. **AWS SDK v3（3.1175.0）は、`AWS_PROFILE` があると `AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY` より名前付きプロファイルを優先する。** 開発者のシェルに `AWS_PROFILE` があると、本物の AWS の鍵を RustFS・ElasticMQ に送って `InvalidAccessKeyId` になる。`src/server/aws.ts` は、エンドポイント（`S3_ENDPOINT`・`SQS_ENDPOINT`）を指定したときだけ環境変数の鍵を明示して渡す（第11章）。
+23. **AWS SDK v3 は既定で PUT の署名付き URL に CRC32 のチェックサムを付け、ブラウザからの PUT が失敗する。** `requestChecksumCalculation: "WHEN_REQUIRED"` を指定する。また `Content-Length` は既定では署名の対象にならないので、`getSignedUrl` に `signableHeaders: new Set(["content-type", "content-length"])` を渡す。RustFS 1.0.6 で、署名と異なる Content-Type・サイズの PUT が 403 になること、CORS のプリフライトが通ることを確認した（第11章）。
+24. **RustFS 1.0.6 は、バケット作成の `LocationConstraint` が自分のリージョン（既定 `us-east-1`）以外だと `InvalidLocationConstraint` で拒否する。** SDK はリージョンが `us-east-1` 以外のとき `ap-northeast-1` を自動で付けるので、`scripts/setup-local-aws.ts` は `us-east-1` を明示する（AWS の S3 では「指定なし」を意味する値で、型の候補にないため型を合わせる）（第11章）。
+25. **`package.json` に `"type": "module"` がないので、tsx は `.ts` を CommonJS として変換し、トップレベルの `await` が使えない。** Worker とスクリプトは `main()` を呼ぶ形にする（第11章）。
+26. **ElasticMQ 1.7.1 の `maxReceiveCount = 3` では、3 回受信して削除されなかったメッセージが、次に受信されるときに DLQ（`flowdesk-jobs-dlq`）へ移る。** Worker は 3 回目の失敗でメッセージを消さずに置く。SMTP に接続できない状態で、1・2 回目の失敗の後に再試行し、3 回目の後に DLQ へ移ることを確認した（第11章）。

@@ -55,5 +55,7 @@ export function failureMessage(
       return "このメールアドレスのユーザーは、すでに組織のメンバーです。";
     case "slug_taken":
       return "この URL はすでに使われています。別の URL を指定してください。";
+    case "upload_mismatch":
+      return "ファイルのアップロードを確認できませんでした。もう一度アップロードしてください。";
   }
 }

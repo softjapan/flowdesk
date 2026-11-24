@@ -97,13 +97,9 @@ export async function inviteMemberAction(
     return { form: failureMessage(result.reason), values };
   }
   refresh();
-  if (!result.value.mailSent) {
-    return {
-      form: "招待を作成しましたが、メールを送信できませんでした。時間をおいて、もう一度招待してください。",
-    };
-  }
+  // メールは Worker が送る（受け付けた時点では、まだ届いていない）
   return {
-    notice: `${parsed.data.email} に招待メールを送りました。`,
+    notice: `${parsed.data.email} への招待メールの送信を受け付けました。`,
   };
 }
 

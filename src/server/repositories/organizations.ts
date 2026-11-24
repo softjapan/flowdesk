@@ -17,6 +17,27 @@ export async function findOrganizationBySlug(
   });
 }
 
+/**
+ * すべての組織の ID と名前。Worker の定期処理（前日リマインド）が、
+ * 組織ごとに絞り込んで予約を探すために使う。画面からは使わない
+ */
+export async function listAllOrganizations(db: Db = getPrisma()) {
+  return db.organization.findMany({
+    select: { id: true, name: true, slug: true },
+    orderBy: { id: "asc" },
+  });
+}
+
+export async function findOrganizationById(
+  id: string,
+  db: Db = getPrisma(),
+) {
+  return db.organization.findUnique({
+    where: { id },
+    select: { id: true, name: true, slug: true },
+  });
+}
+
 /** ロールが FlowDesk のものでないメンバーは、メンバーでないものとして扱う */
 export async function findMember(
   organizationId: string,

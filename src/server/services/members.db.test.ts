@@ -10,7 +10,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getAuth } from "@/server/auth";
 import { getPrisma } from "@/server/db";
 import type { Role } from "@/server/domain";
-import type { Mail } from "@/server/mail";
 import { createMember } from "@/server/repositories/organizations";
 import { listAuditLogs } from "@/server/services/audit-logs";
 import {
@@ -349,10 +348,19 @@ describe("メンバーの削除（F-04）", () => {
 });
 
 describe("招待（F-03）", () => {
-  const sent: Mail[] = [];
-  const send = async (mail: Mail) => {
-    sent.push(mail);
+  // メールは Worker が送る。ここではキューに送られたジョブ ID を記録し、
+  // 依頼されたメール（job の payload）を DB から読む
+  const dispatched: string[] = [];
+  const send = async (jobIds: string[]) => {
+    dispatched.push(...jobIds);
   };
+  async function queuedMail(jobId: string | undefined) {
+    const job = await getPrisma().job.findUnique({
+      where: { id: jobId ?? "" },
+    });
+    return job?.payload as
+      { to: string; subject: string; text: string } | undefined;
+  }
   const inviteeEmail = emailOf(users.invitee);
 
   it("Admin は Owner を招待できない。Staff は招待できない", async () => {
@@ -372,7 +380,7 @@ describe("招待（F-03）", () => {
         send,
       ),
     ).toEqual({ ok: false, reason: "forbidden" });
-    expect(sent).toHaveLength(0);
+    expect(dispatched).toHaveLength(0);
   });
 
   it("すでにメンバーのアドレスは招待できない", async () => {
@@ -395,9 +403,10 @@ describe("招待（F-03）", () => {
     );
     if (!result.ok) throw new Error(result.reason);
     const { id } = result.value;
-    expect(result.value.mailSent).toBe(true);
-    expect(sent.at(-1)?.to).toBe(inviteeEmail);
-    expect(sent.at(-1)?.text).toContain(`/invitations/${id}`);
+    expect(dispatched).toHaveLength(1);
+    const mail = await queuedMail(dispatched.at(-1));
+    expect(mail?.to).toBe(inviteeEmail);
+    expect(mail?.text).toContain(`/invitations/${id}`);
     expect(await auditCount("invitation.create", id)).toBe(1);
 
     // 他人宛ての招待は見えず、受諾もできない
@@ -524,19 +533,27 @@ describe("招待（F-03）", () => {
     ).toEqual({ ok: false, reason: "not_found" });
   });
 
-  it("メールを送れなくても招待は残り、mailSent: false を返す", async () => {
+  it("キューに送れなくても、招待とメールの依頼は残る（Worker が送り直す）", async () => {
     const result = await inviteMember(
       await ctxOf(users.owner),
       { email: "nobody@example.com", role: "staff" },
       TEST_NOW,
       async () => {
-        throw new Error("SMTP に接続できない");
+        throw new Error("SQS に接続できない");
       },
-    );
-    expect(result).toMatchObject({
-      ok: true,
-      value: { mailSent: false },
+    ).catch((error: unknown) => error);
+    // dispatchJobs は失敗を例外にしないが、差し替えた関数が投げても
+    // 招待とメールの依頼はコミット済み
+    expect(result).toBeInstanceOf(Error);
+    const job = await getPrisma().job.findFirst({
+      where: {
+        organizationId,
+        type: "mail.send",
+        payload: { path: ["to"], equals: "nobody@example.com" },
+      },
     });
+    expect(job?.status).toBe("queued");
+    expect(job?.publishedAt).toBeNull();
   });
 });
 

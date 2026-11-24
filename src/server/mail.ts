@@ -2,6 +2,10 @@
  * メールの送信（SMTP）。ローカルでは docker compose の Mailpit に送り、
  * http://localhost:8025 で中身を確認する。本番は SES の SMTP を想定し、
  * SMTP_USER・SMTP_PASSWORD があれば認証する。
+ *
+ * 第11章から、SMTP に送るのは Worker（src/worker/index.ts）だけになった。
+ * アプリはメールを送らず、送信の依頼をジョブとしてキューに積む
+ * （src/server/services/jobs.ts の createMailJob・enqueueMail）。
  */
 import nodemailer, { type Transporter } from "nodemailer";
 
@@ -31,12 +35,23 @@ function getTransport(): Transporter {
   return globalForMail.mailTransport;
 }
 
-export async function sendMail(mail: Mail): Promise<void> {
+/**
+ * messageId はジョブごとに固定の値を渡す。同じジョブを送り直したとき、
+ * 受信側（メールソフト）が同じメールとして扱える
+ */
+export async function sendMail(
+  mail: Mail,
+  options: { messageId?: string } = {},
+): Promise<void> {
   const from = process.env.MAIL_FROM;
   if (!from) {
     throw new Error(
       "MAIL_FROM が設定されていない（.env.example を参照）",
     );
   }
-  await getTransport().sendMail({ from, ...mail });
+  await getTransport().sendMail({
+    from,
+    ...mail,
+    messageId: options.messageId,
+  });
 }

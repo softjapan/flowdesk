@@ -18,6 +18,8 @@ import {
   deleteCustomer,
   updateCustomer,
 } from "@/server/services/customers";
+import { completeUpload } from "@/server/services/attachments";
+import { requestCustomerExport } from "@/server/services/customer-exports";
 import {
   CUSTOMER_FIELDS,
   customerInputSchema,
@@ -116,4 +118,43 @@ export async function deleteCustomerAction(
     return { form: failureMessage(result.reason) };
   }
   redirect(`/${ctx.slug}/customers`);
+}
+
+export type CustomerExportState = { form?: string; notice?: string };
+
+/** 顧客一覧の CSV エクスポートを依頼する（F-11）。CSV は Worker が作る */
+export async function requestCustomerExportAction(
+  slug: string,
+): Promise<CustomerExportState> {
+  const ctx = await requireOrgContext(slug);
+  const result = await requestCustomerExport(ctx);
+  if (!result.ok) {
+    if (result.reason === "not_found") notFound();
+    return { form: failureMessage(result.reason) };
+  }
+  refresh();
+  return {
+    notice:
+      "CSV の作成を受け付けました。できあがったらメールでお知らせします。",
+  };
+}
+
+export type CompleteUploadState = { form?: string };
+
+/**
+ * ブラウザが S3 への PUT を終えた後に呼ぶ（F-12）。S3 にあるファイルの
+ * 形式とサイズを Service が確かめてから、添付ファイルとして登録する
+ */
+export async function completeUploadAction(
+  slug: string,
+  attachmentId: string,
+): Promise<CompleteUploadState> {
+  const ctx = await requireOrgContext(slug);
+  const result = await completeUpload(ctx, requireId(attachmentId));
+  if (!result.ok) {
+    if (result.reason === "not_found") notFound();
+    return { form: failureMessage(result.reason) };
+  }
+  refresh();
+  return {};
 }

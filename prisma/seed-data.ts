@@ -446,6 +446,8 @@ export function buildSeedData(now: Date): SeedData {
 
 /** シードが空にするテーブル（Better Auth のテーブルも含む） */
 const tables = [
+  "job",
+  "customerExport",
   "auditLog",
   "subscription",
   "attachment",

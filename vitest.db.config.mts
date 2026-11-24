@@ -45,8 +45,10 @@ export default defineConfig({
     include: ["**/*.db.test.ts"],
     exclude: ["node_modules/**", ".next/**"],
     globalSetup: ["./test/db-global-setup.ts"],
-    // テストのワーカーでは、テスト用 DB を DATABASE_URL として使う
-    env: { DATABASE_URL: testDatabaseUrl },
+    // テストのワーカーでは、テスト用 DB を DATABASE_URL として使う。
+    // ジョブは SQS に送らない（開発用の Worker がテスト用 DB のジョブを
+    // 受け取らないように。送る処理はテストで差し替えて確かめる）
+    env: { DATABASE_URL: testDatabaseUrl, SQS_QUEUE_URL: "" },
     // 同じ DB を更新するテストがあるので、ファイルを並列に実行しない
     fileParallelism: false,
   },

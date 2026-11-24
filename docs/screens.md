@@ -29,5 +29,6 @@
 |------|------|----|
 | `/api/auth/[...all]` | Better Auth のハンドラー | 8 |
 | `/api/webhooks/stripe` | Stripe Webhook（署名検証） | 12 |
-| `/api/uploads/presign` | S3 署名付き URL の発行 | 11 |
+| `/api/uploads/presign` | S3 署名付き URL の発行（POST、JSON。画像と PDF、10MB まで） | 11 |
+| `/api/exports/[id]?org=` | 顧客一覧の CSV のダウンロード（権限を確かめてから署名付き URL へリダイレクト） | 11 |
 | `/api/health` | ALB のヘルスチェック | 16 |

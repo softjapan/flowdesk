@@ -130,3 +130,42 @@ export async function updateReservationWithVersion(
   }
   return { status: "updated", reservation: current };
 }
+
+/** 予約のメール（確定・リマインド）の文面に使う、顧客・店舗・メニュー・担当付きの予約 */
+export async function findReservationForMail(
+  organizationId: string,
+  id: string,
+  db: Db = getPrisma(),
+) {
+  return db.reservation.findFirst({
+    where: { id, organizationId },
+    include: {
+      organization: { select: { name: true } },
+      customer: {
+        select: { name: true, email: true, deletedAt: true },
+      },
+      location: { select: { name: true, timezone: true } },
+      service: { select: { name: true } },
+      staffProfile: { select: { displayName: true } },
+    },
+  });
+}
+
+/** 店舗の、startsAt が [from, to) の確定済みの予約（前日リマインドの対象） */
+export async function listConfirmedReservationsAt(
+  organizationId: string,
+  locationId: string,
+  range: { from: Date; to: Date },
+  db: Db = getPrisma(),
+) {
+  return db.reservation.findMany({
+    where: {
+      organizationId,
+      locationId,
+      status: "confirmed",
+      startsAt: { gte: range.from, lt: range.to },
+    },
+    select: { id: true, startsAt: true },
+    orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+  });
+}

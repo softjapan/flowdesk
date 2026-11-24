@@ -10,7 +10,6 @@
 import { buildInvitationMail } from "@/server/auth-mails";
 import { runInTransaction } from "@/server/db";
 import { ROLE_LABELS, type Role } from "@/server/domain";
-import { sendMail, type Mail } from "@/server/mail";
 import { createAuditLog } from "@/server/repositories/audit-logs";
 import {
   cancelPendingInvitationsForEmail,
@@ -42,6 +41,11 @@ import {
   changeableRoles,
   invitableRoles,
 } from "@/server/services/authz";
+import {
+  createMailJob,
+  dispatchJobs,
+  type Dispatch,
+} from "@/server/services/jobs";
 import type { OrgContext } from "@/server/services/org-context";
 import { fail, ok, type Result } from "@/server/services/result";
 import type { InvitationInput } from "@/server/validation/organization";
@@ -233,16 +237,17 @@ function invitationUrl(id: string): string {
 }
 
 /**
- * 招待を作り、招待メールを送る。同じアドレスへの未対応の招待は取り消して
- * 作り直す（リンクは最新のものだけが有効）。メールの送信に失敗しても
- * 招待は残し、mailSent: false を返す（画面で送り直しを促す）
+ * 招待を作り、招待メールの送信を依頼する。同じアドレスへの未対応の招待は
+ * 取り消して作り直す（リンクは最新のものだけが有効）。メールの依頼は
+ * 招待と同じトランザクションで作るので、招待だけができてメールが
+ * 送られない、ということはない（送信は Worker が行い、失敗すれば再試行する）
  */
 export async function inviteMember(
   ctx: OrgContext,
   input: InvitationInput,
   now: Date,
-  send: (mail: Mail) => Promise<void> = sendMail,
-): Promise<Result<{ id: string; mailSent: boolean }>> {
+  dispatch: Dispatch = dispatchJobs,
+): Promise<Result<{ id: string }>> {
   if (!canInvite(ctx.role, input.role)) return fail("forbidden");
   const result = await runInTransaction(async (tx) => {
     if (!(await lockOrganization(ctx.organizationId, tx))) {
@@ -284,28 +289,28 @@ export async function inviteMember(
       },
       tx,
     );
-    return ok(invitation);
-  });
-  if (!result.ok) return result;
-
-  // メールはトランザクションの外で送る（送信を待つ間 DB のロックを持たない）
-  const inviter = await findUserById(ctx.userId);
-  try {
-    await send(
+    const inviter = await findUserById(ctx.userId, tx);
+    const jobId = await createMailJob(
       buildInvitationMail({
         to: input.email,
         organizationName: ctx.organizationName,
         inviterName: inviter?.name ?? "組織のメンバー",
         roleLabel: ROLE_LABELS[input.role],
-        url: invitationUrl(result.value.id),
+        url: invitationUrl(invitation.id),
         expiresInHours: INVITATION_EXPIRES_IN_HOURS,
       }),
+      {
+        key: `invitation:${invitation.id}`,
+        organizationId: ctx.organizationId,
+      },
+      tx,
     );
-    return ok({ id: result.value.id, mailSent: true });
-  } catch (error) {
-    console.error("招待メールの送信に失敗", error);
-    return ok({ id: result.value.id, mailSent: false });
-  }
+    return ok({ id: invitation.id, jobId });
+  });
+  if (!result.ok) return result;
+  // キューへはコミットした後に送る（送れなくても Worker が送り直す）
+  await dispatch([result.value.jobId]);
+  return ok({ id: result.value.id });
 }
 
 export async function cancelInvitation(

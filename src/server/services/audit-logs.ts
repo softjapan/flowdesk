@@ -31,6 +31,8 @@ export const AUDIT_TARGET_LABELS: Record<string, string> = {
   invitation: "招待",
   customer: "顧客",
   reservation: "予約",
+  attachment: "添付ファイル",
+  customerExport: "CSV エクスポート",
 };
 
 const actionLabels: Record<string, string> = {
@@ -43,6 +45,8 @@ const actionLabels: Record<string, string> = {
   "customer.create": "顧客の登録",
   "customer.update": "顧客の編集",
   "customer.delete": "顧客の削除",
+  "customer.export": "顧客一覧の CSV エクスポート",
+  "attachment.upload": "添付ファイルのアップロード",
   "reservation.create": "予約の作成",
   "reservation.update": "予約の変更",
   "reservation.cancel": "予約のキャンセル",
