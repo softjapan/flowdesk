@@ -12,7 +12,10 @@ if grep -Eq '(^|/)\.env($|\.local$|\..+\.local$|\.production$)' \
 fi
 # 検出パターンを書いたこのファイル自身は対象から外す
 added=$(git diff --cached -U0 -- . ':(exclude).githooks')
-if grep -Eq '^\+.*(sk_live_|rk_live_|AKIA[0-9A-Z]{16})' <<<"$added"; then
+# 接頭辞だけの言及（「sk_live_ は使わない」など）は止めず、
+# 接頭辞の後に英数字が続く、本物のキーの形だけを止める
+if grep -Eq '^\+.*((sk|rk)_live_[0-9A-Za-z]{10,}|AKIA[0-9A-Z]{16})' \
+  <<<"$added"; then
   echo "pre-commit: 本番の API キーらしき文字列が含まれている" >&2
   exit 1
 fi
