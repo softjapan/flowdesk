@@ -30,10 +30,14 @@ import {
   headObject,
   presignGet,
   presignPut,
+  readObjectPrefix,
   type ObjectHead,
 } from "@/server/storage";
 import {
+  ALLOWED_UPLOAD_TYPES,
   isImageType,
+  matchesMagicBytes,
+  type UploadContentType,
   type PresignRequest,
 } from "@/server/validation/upload";
 
@@ -42,12 +46,14 @@ export type StorageDeps = {
   presignPut: typeof presignPut;
   presignGet: typeof presignGet;
   headObject: (key: string) => Promise<ObjectHead | null>;
+  readObjectPrefix: (key: string) => Promise<Uint8Array | null>;
 };
 
 const defaultStorage: StorageDeps = {
   presignPut,
   presignGet,
   headObject,
+  readObjectPrefix: (key) => readObjectPrefix(key),
 };
 
 export type UploadTicket = {
@@ -126,6 +132,20 @@ export async function completeUpload(
     !head ||
     head.sizeBytes !== attachment.sizeBytes ||
     head.contentType !== attachment.contentType
+  ) {
+    return fail("upload_mismatch");
+  }
+  // 申告された形式と中身が一致するか（名前だけ .png の SVG などを拒否する）
+  const prefix = await storage.readObjectPrefix(attachment.s3Key);
+  if (
+    !prefix ||
+    !(ALLOWED_UPLOAD_TYPES as readonly string[]).includes(
+      attachment.contentType,
+    ) ||
+    !matchesMagicBytes(
+      attachment.contentType as UploadContentType,
+      prefix,
+    )
   ) {
     return fail("upload_mismatch");
   }

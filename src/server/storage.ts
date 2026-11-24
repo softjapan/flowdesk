@@ -6,6 +6,7 @@
 import {
   GetObjectCommand,
   HeadObjectCommand,
+  NoSuchKey,
   NotFound,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
@@ -86,6 +87,37 @@ export async function headObject(
   } catch (error) {
     if (
       error instanceof NotFound ||
+      (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+        ?.httpStatusCode === 404
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * オブジェクトの先頭の数バイト。形式の申告（Content-Type）が中身と
+ * 合っているかを確かめるために使う。なければ null
+ */
+export async function readObjectPrefix(
+  key: string,
+  bytes = 16,
+): Promise<Uint8Array | null> {
+  try {
+    const object = await getS3().send(
+      new GetObjectCommand({
+        Bucket: s3Bucket(),
+        Key: key,
+        Range: `bytes=0-${bytes - 1}`,
+      }),
+    );
+    return object.Body
+      ? await object.Body.transformToByteArray()
+      : null;
+  } catch (error) {
+    if (
+      error instanceof NoSuchKey ||
       (error as { $metadata?: { httpStatusCode?: number } }).$metadata
         ?.httpStatusCode === 404
     ) {

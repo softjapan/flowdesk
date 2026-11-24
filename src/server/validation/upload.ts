@@ -49,3 +49,31 @@ export const presignRequestSchema = z.object({
 });
 
 export type PresignRequest = z.infer<typeof presignRequestSchema>;
+
+const ascii = (bytes: Uint8Array, start: number, text: string) =>
+  [...text].every((c, i) => bytes[start + i] === c.charCodeAt(0));
+
+/**
+ * ファイルの先頭のバイト（マジックナンバー）が、申告された形式と合うか。
+ * Content-Type はブラウザが拡張子から決めるので、名前だけ .png にした
+ * SVG や HTML も image/png として届く。中身で確かめてから登録する
+ */
+export function matchesMagicBytes(
+  contentType: UploadContentType,
+  bytes: Uint8Array,
+): boolean {
+  switch (contentType) {
+    case "image/jpeg":
+      return (
+        bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      );
+    case "image/png":
+      return bytes[0] === 0x89 && ascii(bytes, 1, "PNG\r\n\x1a\n");
+    case "image/gif":
+      return ascii(bytes, 0, "GIF87a") || ascii(bytes, 0, "GIF89a");
+    case "image/webp":
+      return ascii(bytes, 0, "RIFF") && ascii(bytes, 8, "WEBP");
+    case "application/pdf":
+      return ascii(bytes, 0, "%PDF-");
+  }
+}

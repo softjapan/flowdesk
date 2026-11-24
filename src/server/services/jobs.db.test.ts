@@ -551,13 +551,18 @@ describe("顧客一覧の CSV エクスポート（F-11）", () => {
 });
 
 describe("添付ファイルのアップロード（F-12）", () => {
+  const PNG_PREFIX = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]);
   function fakeStorage(
     head: { contentType: string; sizeBytes: number } | null,
+    prefix: Uint8Array | null = PNG_PREFIX,
   ): StorageDeps {
     return {
       presignPut: async ({ key }) => `https://s3.example/put/${key}`,
       presignGet: async ({ key }) => `https://s3.example/get/${key}`,
       headObject: async () => head,
+      readObjectPrefix: async () => prefix,
     };
   }
   const input = {
@@ -614,6 +619,19 @@ describe("添付ファイルのアップロード（F-12）", () => {
     expect(
       await listAttachments(ctx, "cus_a_004", fakeStorage(null)),
     ).toEqual([]);
+
+    // 形式とサイズが申告どおりでも、中身が PNG でなければ登録しない
+    // （名前だけ .png にした SVG）
+    expect(
+      await completeUpload(
+        ctx,
+        ticket.value.attachmentId,
+        fakeStorage(
+          { contentType: "image/png", sizeBytes: 2048 },
+          new TextEncoder().encode("<svg xmlns="),
+        ),
+      ),
+    ).toEqual({ ok: false, reason: "upload_mismatch" });
 
     // 他の組織からは完了にできない
     expect(
