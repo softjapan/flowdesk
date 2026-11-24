@@ -49,7 +49,7 @@ export const getOrgContext = cache(async function getOrgContext(
 
 /**
  * ログイン後の行き先にする組織のスラッグ（最初に所属した組織）。
- * どの組織にも所属していなければ null（組織の作成は第10章の /orgs）。
+ * どの組織にも所属していなければ null（呼び出し側で /orgs へ送る）。
  */
 export async function findHomeOrgSlug(
   userId: string,

@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { customerInputSchema } from "@/server/validation/customer";
 import { fieldErrorsOf, formValues } from "@/server/validation/form";
 import {
+  invitationInputSchema,
+  organizationInputSchema,
+} from "@/server/validation/organization";
+import {
   reservationInputSchema,
   versionSchema,
 } from "@/server/validation/reservation";
@@ -156,5 +160,48 @@ describe("versionSchema", () => {
     for (const v of [null, "", "0", "1.5", "abc"]) {
       expect(versionSchema.safeParse(v).success).toBe(false);
     }
+  });
+});
+
+describe("organizationInputSchema（S-04）", () => {
+  it("スラッグは小文字にし、アプリのパスと重なる名前は使わせない", () => {
+    expect(
+      organizationInputSchema.parse({
+        name: " 新店 ",
+        slug: "New-Shop",
+      }),
+    ).toEqual({ name: "新店", slug: "new-shop" });
+    for (const slug of [
+      "orgs",
+      "invitations",
+      "api",
+      "a",
+      "-ab",
+      "ab-",
+      "a_b",
+      "あいう",
+    ]) {
+      expect(
+        organizationInputSchema.safeParse({ name: "x", slug })
+          .success,
+      ).toBe(false);
+    }
+  });
+});
+
+describe("invitationInputSchema（S-13）", () => {
+  it("メールアドレスは小文字にし、ロールは owner・admin・staff のみ", () => {
+    expect(
+      invitationInputSchema.parse({
+        email: " Hanako@Example.com ",
+        role: "staff",
+      }),
+    ).toEqual({ email: "hanako@example.com", role: "staff" });
+    expect(
+      invitationInputSchema.safeParse({
+        email: "hanako@example.com",
+        role: "member",
+      }).success,
+    ).toBe(false);
   });
 });

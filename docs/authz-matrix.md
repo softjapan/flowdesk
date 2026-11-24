@@ -2,6 +2,8 @@
 
 Better Auth の organization プラグインの既定ロールは `owner` / `admin` / `member`。FlowDesk では `member` の代わりに `staff` を定義する（`createAccessControl` でロールと権限を宣言する。第10章）。
 
+ロールと権限の宣言は `src/server/access-control.ts`（`createAccessControl`）、判定は `src/server/services/authz.ts`。表の「△」のうち、担当や相手のロールで決まる条件（Staff は自分の担当のみ、Admin は Staff⇔Admin のみ）は宣言では表せないので `authz.ts` で足し、DB の状態で決まる条件（最後の Owner）は Service がトランザクションの中で確かめる。organization プラグインの組織・メンバーを変更する HTTP の入口（`/api/auth/organization/update-member-role` など）は `disabledPaths` で閉じ、変更はすべて Service を通す（監査ログを同じトランザクションで残すため）。
+
 ○＝可、△＝条件付き、－＝不可。
 すべての操作は、まず「ログイン済み」かつ「対象の組織のメンバー」であることを確認し、そのうえでこの表を適用する。
 

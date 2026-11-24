@@ -1,9 +1,19 @@
 /** DB を使わない Service のテスト。DB を使うものは services.db.test.ts */
 import { describe, expect, it } from "vitest";
 import { isReservationOverlapError } from "@/server/repositories/reservations";
+import { roles, toRole } from "@/server/access-control";
+import { describeAuditDiff } from "@/server/services/audit-logs";
 import {
+  can,
+  canChangeRole,
   canDeleteCustomer,
+  canInvite,
   canManageReservation,
+  canRemoveMember,
+  canViewAuditLogs,
+  canViewRevenue,
+  changeableRoles,
+  invitableRoles,
 } from "@/server/services/authz";
 import { parseCustomerListQuery } from "@/server/services/customers";
 import { parseCalendarQuery } from "@/server/services/reservations";
@@ -68,6 +78,118 @@ describe("authz（docs/authz-matrix.md）", () => {
     );
     // スタッフ情報のない Staff は何も操作できない
     expect(canManageReservation("staff", "stf_1", null)).toBe(false);
+  });
+});
+
+describe("ロールの定義（src/server/access-control.ts）", () => {
+  it("owner・admin・staff だけを定義し、既定の member は使わない", () => {
+    expect(Object.keys(roles).sort()).toEqual([
+      "admin",
+      "owner",
+      "staff",
+    ]);
+    expect(toRole("member")).toBeNull();
+    expect(toRole("admin,staff")).toBeNull();
+    expect(toRole(null)).toBeNull();
+    expect(toRole("staff")).toBe("staff");
+  });
+
+  it("組織の削除と料金プランの変更は Owner だけ", () => {
+    expect(can("owner", { organization: ["delete"] })).toBe(true);
+    expect(can("admin", { organization: ["delete"] })).toBe(false);
+    expect(can("admin", { organization: ["update"] })).toBe(true);
+    expect(can("staff", { organization: ["update"] })).toBe(false);
+    expect(can("owner", { billing: ["update"] })).toBe(true);
+    expect(can("admin", { billing: ["update"] })).toBe(false);
+    expect(can("admin", { billing: ["read"] })).toBe(true);
+    expect(can("staff", { billing: ["read"] })).toBe(false);
+  });
+
+  it("CSV エクスポート・監査ログ・売上は Staff に許さない", () => {
+    for (const role of ["owner", "admin"] as const) {
+      expect(can(role, { customer: ["export"] })).toBe(true);
+      expect(canViewAuditLogs(role)).toBe(true);
+      expect(canViewRevenue(role)).toBe(true);
+    }
+    expect(can("staff", { customer: ["export"] })).toBe(false);
+    expect(canViewAuditLogs("staff")).toBe(false);
+    expect(canViewRevenue("staff")).toBe(false);
+    // 顧客の閲覧・作成・編集は Staff も可
+    expect(
+      can("staff", { customer: ["read", "create", "update"] }),
+    ).toBe(true);
+  });
+});
+
+describe("メンバーの権限（docs/authz-matrix.md）", () => {
+  it("ケース 3：Admin は自分も他の人も Owner に昇格できない", () => {
+    expect(canChangeRole("admin", "admin", "owner")).toBe(false);
+    expect(canChangeRole("admin", "staff", "owner")).toBe(false);
+    expect(changeableRoles("admin", "admin")).toEqual([
+      "admin",
+      "staff",
+    ]);
+    expect(changeableRoles("admin", "owner")).toEqual([]);
+  });
+
+  it("Admin は Staff⇔Admin のみ、Owner は何でも変更できる", () => {
+    expect(canChangeRole("admin", "staff", "admin")).toBe(true);
+    expect(canChangeRole("admin", "admin", "staff")).toBe(true);
+    expect(canChangeRole("admin", "owner", "admin")).toBe(false);
+    expect(canChangeRole("owner", "staff", "owner")).toBe(true);
+    expect(canChangeRole("owner", "owner", "staff")).toBe(true);
+    expect(canChangeRole("staff", "staff", "admin")).toBe(false);
+  });
+
+  it("削除は Owner は誰でも、Admin は Staff のみ", () => {
+    expect(canRemoveMember("owner", "owner")).toBe(true);
+    expect(canRemoveMember("admin", "staff")).toBe(true);
+    expect(canRemoveMember("admin", "admin")).toBe(false);
+    expect(canRemoveMember("admin", "owner")).toBe(false);
+    expect(canRemoveMember("staff", "staff")).toBe(false);
+  });
+
+  it("招待は Owner・Admin。Admin は Owner を招待できない", () => {
+    expect(invitableRoles("owner")).toEqual([
+      "owner",
+      "admin",
+      "staff",
+    ]);
+    expect(invitableRoles("admin")).toEqual(["admin", "staff"]);
+    expect(invitableRoles("staff")).toEqual([]);
+    expect(canInvite("admin", "owner")).toBe(false);
+  });
+});
+
+describe("describeAuditDiff", () => {
+  const names = new Map([["user_a2", "鈴木 次郎"]]);
+
+  it("ロール変更は「誰の・何から何へ」", () => {
+    expect(
+      describeAuditDiff(
+        "member.update_role",
+        { userId: "user_a2", from: "staff", to: "admin" },
+        names,
+      ),
+    ).toBe("鈴木 次郎：Staff → Admin");
+  });
+
+  it("顧客の変更は項目名、形の分からない diff はキーを並べる", () => {
+    expect(
+      describeAuditDiff(
+        "customer.update",
+        { fields: ["email", "phone"] },
+        names,
+      ),
+    ).toBe("項目：email, phone");
+    expect(
+      describeAuditDiff(
+        "reservation.update",
+        { startsAt: {} },
+        names,
+      ),
+    ).toBe("startsAt");
+    expect(describeAuditDiff("x", null, names)).toBe("");
   });
 });
 

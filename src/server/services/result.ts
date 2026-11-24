@@ -12,7 +12,13 @@ export type Failure =
   /** 同じスタッフの予約と時間が重なる（排他制約） */
   | "slot_taken"
   /** キャンセル済み・来店済みの予約は変更できない */
-  | "not_editable";
+  | "not_editable"
+  /** 最後の Owner を降格・削除しようとした（組織に Owner がいなくなる） */
+  | "last_owner"
+  /** 招待しようとした相手が、すでに組織のメンバー */
+  | "already_member"
+  /** 組織の URL（スラッグ）が使われている */
+  | "slug_taken";
 
 export type Result<T> =
   { ok: true; value: T } | { ok: false; reason: Failure };

@@ -50,3 +50,16 @@ export const calendarQuerySchema = z.object({
     .nullable()
     .catch(null),
 });
+
+/** 監査ログ（S-15）の絞り込み。期間は店舗のタイムゾーンでの日付 */
+export const auditLogQuerySchema = z.object({
+  from: first(z.string().refine(isValidYmd)).nullable().catch(null),
+  to: first(z.string().refine(isValidYmd)).nullable().catch(null),
+  actor: first(z.string().regex(/^[\w-]{1,64}$/))
+    .nullable()
+    .catch(null),
+  target: first(z.string().regex(/^[a-zA-Z]{1,32}$/))
+    .nullable()
+    .catch(null),
+  page: positiveInt(1),
+});

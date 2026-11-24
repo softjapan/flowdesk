@@ -9,6 +9,7 @@ export type NavItem = {
 };
 
 const all = ["owner", "admin", "staff"] as const;
+const ownerAdmin = ["owner", "admin"] as const;
 
 /**
  * サイドバーの項目。roles は docs/screens.md の「権限」列に合わせる。
@@ -34,6 +35,18 @@ export const navItems: readonly NavItem[] = [
     label: "顧客一覧",
     segment: "customers",
     roles: all,
+  },
+  {
+    key: "members",
+    label: "メンバー管理",
+    segment: "members",
+    roles: ownerAdmin,
+  },
+  {
+    key: "audit-logs",
+    label: "監査ログ",
+    segment: "audit-logs",
+    roles: ownerAdmin,
   },
 ];
 

@@ -5,12 +5,13 @@
  *   npx auth@1.7.27 generate --config src/server/auth-cli.ts
  * HTTP の入口は src/app/api/auth/[...all]/route.ts。
  * サーバー側でのセッションの取得は src/server/session.ts から行う。
- * staff ロールの定義（createAccessControl）は第10章で追加する。
+ * ロール（owner・admin・staff）は src/server/access-control.ts で定義する。
  */
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { organization } from "better-auth/plugins/organization";
+import { ac, roles } from "@/server/access-control";
 import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
@@ -20,6 +21,29 @@ import { getPrisma } from "@/server/db";
 import { sendMail } from "@/server/mail";
 
 const RESET_PASSWORD_EXPIRES_IN_SECONDS = 60 * 60;
+
+/**
+ * organization プラグインの、組織とメンバーを変更する HTTP の入口。
+ * 組織の作成・招待・ロール変更・削除は Service 層
+ * （src/server/services/organizations.ts・members.ts・invitations.ts）で
+ * docs/authz-matrix.md に従って判定し、監査ログと同じトランザクションで
+ * 確定させる。プラグインの入口を開けておくと、Admin が Admin を削除する
+ * など表と異なる操作や、監査ログに残らない変更ができてしまうので閉じる。
+ * disabledPaths は HTTP のリクエストだけを止める（サーバーからの
+ * getAuth().api の呼び出しは止めない）
+ */
+const DISABLED_ORGANIZATION_PATHS = [
+  "/organization/create",
+  "/organization/update",
+  "/organization/delete",
+  "/organization/invite-member",
+  "/organization/cancel-invitation",
+  "/organization/accept-invitation",
+  "/organization/reject-invitation",
+  "/organization/update-member-role",
+  "/organization/remove-member",
+  "/organization/leave",
+];
 
 /**
  * Better Auth の設定を作る。prismaAdapter は作る時点で Client を使うので、
@@ -32,6 +56,7 @@ export function createAuth() {
     secret: process.env.BETTER_AUTH_SECRET,
     baseURL: process.env.BETTER_AUTH_URL,
     database: prismaAdapter(getPrisma(), { provider: "postgresql" }),
+    disabledPaths: DISABLED_ORGANIZATION_PATHS,
     emailAndPassword: {
       enabled: true,
       minPasswordLength: PASSWORD_MIN_LENGTH,
@@ -56,7 +81,11 @@ export function createAuth() {
     },
     // nextCookies は Server Action から呼んだときに Cookie を設定する。
     // プラグインの最後に置く
-    plugins: [organization(), nextCookies()],
+    plugins: [
+      // 既定の owner・admin・member の代わりに owner・admin・staff を使う
+      organization({ ac, roles, creatorRole: "owner" }),
+      nextCookies(),
+    ],
   });
 }
 

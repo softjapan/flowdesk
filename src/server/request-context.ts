@@ -49,5 +49,11 @@ export function failureMessage(
       return "その時間は、担当スタッフの別の予約で埋まっています。";
     case "not_editable":
       return "キャンセル済み・来店済みの予約は変更できません。";
+    case "last_owner":
+      return "組織には Owner が 1 人以上必要です。先に別のメンバーを Owner にしてください。";
+    case "already_member":
+      return "このメールアドレスのユーザーは、すでに組織のメンバーです。";
+    case "slug_taken":
+      return "この URL はすでに使われています。別の URL を指定してください。";
   }
 }

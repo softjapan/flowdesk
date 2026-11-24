@@ -29,7 +29,10 @@ import {
   updateReservationWithVersion,
   type ReservationChanges,
 } from "@/server/repositories/reservations";
-import { canManageReservation } from "@/server/services/authz";
+import {
+  canManageAllReservations,
+  canManageReservation,
+} from "@/server/services/authz";
 import type { OrgContext } from "@/server/services/org-context";
 import { fail, ok, type Result } from "@/server/services/result";
 import type { ReservationInput } from "@/server/validation/reservation";
@@ -165,12 +168,12 @@ export type ReservationFormOptions = {
   locations: Option[];
 };
 
-/** 操作する人自身のスタッフ情報の ID（Staff 以外は判定に使わない） */
+/** 操作する人自身のスタッフ情報の ID（すべての予約を操作できるロールは判定に使わない） */
 async function ownStaffProfileId(
   ctx: OrgContext,
   db?: Db,
 ): Promise<string | null> {
-  if (ctx.role !== "staff") return null;
+  if (canManageAllReservations(ctx.role)) return null;
   const own = await findStaffProfileByMember(
     ctx.organizationId,
     ctx.memberId,

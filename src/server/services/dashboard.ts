@@ -12,6 +12,7 @@ import {
 } from "@/server/repositories/catalog";
 import { listCustomers } from "@/server/repositories/customers";
 import { listReservations } from "@/server/repositories/reservations";
+import { canViewRevenue } from "@/server/services/authz";
 import type { OrgContext } from "@/server/services/org-context";
 
 export const TREND_DAYS = 14;
@@ -41,11 +42,6 @@ export type Dashboard = {
   trend: { date: string; count: number }[];
   today: TodayReservation[];
 };
-
-/** docs/authz-matrix.md「ダッシュボード／売上の表示」 */
-export function canViewRevenue(role: OrgContext["role"]): boolean {
-  return role === "owner" || role === "admin";
-}
 
 export async function getDashboard(
   ctx: OrgContext,

@@ -39,7 +39,7 @@ erDiagram
     staffProfile {
         string id PK
         string organizationId FK
-        string memberId FK,UK
+        string memberId FK,UK "メンバー削除で null"
         string displayName
         boolean active
     }
@@ -107,6 +107,33 @@ erDiagram
         datetime createdAt
     }
 ```
+
+メンバーを削除しても `staffProfile` は消さない（担当した予約の履歴が `(organizationId, staffProfileId)` で参照しているため）。`memberId` は `ON DELETE SET NULL` で null になり、`active` を false にする（第10章、マイグレーション `20261124123959_staff_profile_keep_on_member_removal`）。
+
+## テナント分離の方式（第10章）
+
+マルチテナントのデータの分け方は、大きく 3 つある。
+
+| 方式 | 仕組み | 分離の強さ | 運用・コスト | 向いている場面 |
+|------|--------|-----------|-------------|----------------|
+| アプリでの絞り込み（共有スキーマ） | 全テナントが同じテーブルを使い、すべてのクエリに `WHERE organizationId = ?` を付ける | 絞り込みを 1 か所でも忘れると他のテナントのデータが見える。コードレビューとテストで守る | テーブルもマイグレーションも 1 組。テナントの追加は行の INSERT だけ。集計・横断の検索が簡単 | 小〜中規模のテナントが多数ある SaaS |
+| PostgreSQL の Row Level Security（共有スキーマ＋RLS） | テーブルに `POLICY ... USING ("organizationId" = current_setting('app.org_id'))` を付け、接続（トランザクション）ごとに `SET LOCAL app.org_id` する | 絞り込みを忘れても DB が行を返さない。ただし設定し忘れ・スーパーユーザーや `BYPASSRLS` のロール・`SET LOCAL` を外れた接続プールの再利用で効かなくなる | ポリシーの管理とテストが増える。Prisma はトランザクションごとに `set_config` を呼ぶ拡張（`$extends`）が必要で、`$transaction` をまたぐ処理や接続プール（PgBouncer のトランザクションモード）との組み合わせに注意がいる。マイグレーション（Prisma Migrate）はポリシーを表現できず SQL を手で書く | 規制が厳しい、多層防御を DB でも持ちたい |
+| スキーマ／DB の分割 | テナントごとに PostgreSQL のスキーマ、または DB（インスタンス）を分ける | 最も強い。誤ったクエリでも他のテナントの行に届かない（接続先・`search_path` を誤らない限り） | テナント数だけマイグレーションを当てる必要があり、失敗したテナントだけ古い版になる。接続数・バックアップ・監視がテナント数に比例する。横断の集計が難しい | テナント数が少なく 1 社が大きい、契約でデータの物理的な分離を求められる |
+
+**FlowDesk はアプリでの絞り込み（共有スキーマ）を採用する。** 理由：
+
+1. 想定する顧客は小規模な店舗が多数（1 組織あたり数人〜十数人のスタッフ、Free プランあり）。テナントごとのスキーマ・DB は、テナント数に比例するマイグレーションと接続の運用に見合わない
+2. 認証・組織まわりは Better Auth の organization プラグインが共有スキーマ（`member.organizationId`）を前提にしている
+3. Prisma 7 とドライバアダプター（`@prisma/adapter-pg`）の構成で RLS を使うには、すべてのクエリをトランザクションで包んで `set_config` する必要があり、第9章の楽観ロック・排他制約の処理と組み合わせると複雑になる。書籍の範囲では、効果に対して導入と検証のコストが大きい
+
+絞り込み漏れの弱点は、次の層で補う：
+
+- **規約**：業務テーブルはすべて `organizationId` を持ち、Repository の関数は第 1 引数に `organizationId` を取る。ID だけで取得するクエリを書かない（`CLAUDE.md`）。組織に属さない `user`・`invitation`（招待された本人が開く S-05）は、ログイン中の本人の ID・メールアドレスで絞り込む
+- **DB の制約**：組織をまたぐ参照は `(organizationId, id)` の複合外部キーで DB が拒否する（上記）
+- **入口**：`[org]` のスラッグから `getOrgContext` でメンバーであることを毎回確かめ、メンバーでなければ 404（存在を漏らさない）
+- **テスト**：`docs/authz-matrix.md` のケース 1（他の組織の ID は 404）を Service と Route Handler の両方で確かめる（`*.db.test.ts`、第13・14章）
+
+将来、規制や大口の顧客の要件で DB 側の防御が必要になったら、共有スキーマのまま RLS を追加できる（テーブルの形は変わらない）。
 
 ## スキーマでは表せない制約（マイグレーション SQL で追加）
 

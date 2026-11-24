@@ -154,8 +154,9 @@ model StaffProfile {
   id             String        @id @default(cuid())
   organizationId String
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  memberId       String        @unique
-  member         Member        @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  /// メンバーを削除すると null になる（担当した予約の履歴を残すため、行は消さない）
+  memberId       String?       @unique
+  member         Member?       @relation(fields: [memberId], references: [id], onDelete: SetNull)
   displayName    String
   active         Boolean       @default(true)
   reservations   Reservation[]

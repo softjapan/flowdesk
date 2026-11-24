@@ -1,9 +1,12 @@
+import { ArrowLeftRight } from "lucide-react";
+import Link from "next/link";
 import { Suspense } from "react";
 import { SignOutButton } from "@/components/sign-out-button";
 import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -12,15 +15,10 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ROLE_LABELS } from "@/server/domain";
 import { getOrgContext } from "@/server/services/org-context";
 import { getCurrentUserId } from "@/server/session";
 import { NavMenu } from "./_components/nav-menu";
-
-const roleLabels = {
-  owner: "Owner",
-  admin: "Admin",
-  staff: "Staff",
-} as const;
 
 // params はここで await せず、Suspense の内側で読む
 // （レイアウトの外枠を静的なシェルとして先に返すため）
@@ -37,7 +35,7 @@ async function OrgHeader({
     <div className="px-2">
       <p className="truncate font-semibold">{ctx.organizationName}</p>
       <p className="text-xs text-muted-foreground">
-        {roleLabels[ctx.role]}
+        {ROLE_LABELS[ctx.role]}
       </p>
     </div>
   );
@@ -91,6 +89,16 @@ export default function OrgLayout({
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
+        <SidebarFooter>
+          {/* 組織の選択・作成（S-04）。組織の外の画面なので全ロールに出す */}
+          <Link
+            href="/orgs"
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          >
+            <ArrowLeftRight aria-hidden="true" className="size-4" />
+            組織の切り替え・作成
+          </Link>
+        </SidebarFooter>
       </Sidebar>
       <SidebarInset>
         <header className="flex h-12 items-center gap-2 border-b px-4">
