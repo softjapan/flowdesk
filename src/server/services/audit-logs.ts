@@ -9,8 +9,10 @@ import {
   zonedToUtc,
 } from "@/lib/datetime";
 import { ROLE_LABELS } from "@/server/domain";
+import { PLANS } from "@/server/plans";
 import { toRole } from "@/server/access-control";
 import {
+  STRIPE_ACTOR_ID,
   listAuditActorIds,
   listAuditLogs as listAuditLogRows,
 } from "@/server/repositories/audit-logs";
@@ -33,6 +35,8 @@ export const AUDIT_TARGET_LABELS: Record<string, string> = {
   reservation: "予約",
   attachment: "添付ファイル",
   customerExport: "CSV エクスポート",
+  location: "店舗",
+  subscription: "料金プラン",
 };
 
 const actionLabels: Record<string, string> = {
@@ -50,6 +54,13 @@ const actionLabels: Record<string, string> = {
   "reservation.create": "予約の作成",
   "reservation.update": "予約の変更",
   "reservation.cancel": "予約のキャンセル",
+  "location.create": "店舗の作成",
+  "subscription.update": "料金プランの変更（Stripe）",
+};
+
+/** ユーザーではない操作者（Webhook など） */
+const systemActorNames: Record<string, string> = {
+  [STRIPE_ACTOR_ID]: "Stripe（Webhook）",
 };
 
 export type AuditLogQuery = {
@@ -85,6 +96,12 @@ function roleLabel(value: unknown): string {
   return role ? ROLE_LABELS[role] : String(value);
 }
 
+function planLabel(value: unknown): string {
+  return value === "pro" || value === "free"
+    ? PLANS[value].label
+    : String(value);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return (
     typeof value === "object" &&
@@ -115,6 +132,13 @@ export function describeAuditDiff(
       return `${String(diff.email)}（${roleLabel(diff.role)}）`;
     case "organization.create":
       return `${String(diff.name)}（/${String(diff.slug)}）`;
+    case "location.create":
+      return String(diff.name);
+    case "subscription.update":
+      if (isRecord(diff.from) && isRecord(diff.to)) {
+        return `${planLabel(diff.from.plan)} → ${planLabel(diff.to.plan)}（${String(diff.to.status)}）`;
+      }
+      break;
   }
   if (Array.isArray(diff.fields)) {
     return `項目：${diff.fields.join(", ")}`;
@@ -178,7 +202,7 @@ export async function listAuditLogs(
     ]),
   ]);
   const nameOf = (id: string) =>
-    names.get(id) ?? "（削除されたユーザー）";
+    systemActorNames[id] ?? names.get(id) ?? "（削除されたユーザー）";
 
   return ok({
     query: {

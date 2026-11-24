@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -122,6 +123,30 @@ export default async function MembersPage({
           のロールだけで、削除できるのは Staff だけです。組織には
           Owner が 1 人以上必要です。
         </p>
+        {page.planUsage && (
+          <p className="text-xs text-muted-foreground">
+            {page.planUsage.label} プラン：スタッフ{" "}
+            {page.planUsage.maxStaff === null
+              ? `${page.planUsage.staff} 人（上限なし）`
+              : `${page.planUsage.staff} / ${page.planUsage.maxStaff} 人`}
+            。上限に達すると、招待と招待の受諾ができません
+            {ctx.role === "owner" ? (
+              <>
+                （
+                <Link
+                  href={`/${ctx.slug}/billing`}
+                  className="underline"
+                >
+                  料金プラン
+                </Link>
+                ）
+              </>
+            ) : (
+              "（プランの変更は Owner が行います）"
+            )}
+            。
+          </p>
+        )}
       </section>
 
       {page.inviteRoles.length > 0 && (

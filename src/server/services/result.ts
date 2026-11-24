@@ -20,7 +20,15 @@ export type Failure =
   /** 組織の URL（スラッグ）が使われている */
   | "slug_taken"
   /** S3 にファイルがない、または申告と形式・サイズが違う */
-  | "upload_mismatch";
+  | "upload_mismatch"
+  /** プランの上限（Free はスタッフ 2 人・店舗 1 つ）に達している */
+  | "plan_limit"
+  /** すでに Pro（変更・解約はカスタマーポータルで行う） */
+  | "already_subscribed"
+  /** Stripe の顧客がまだない（Pro に申し込んだことがない） */
+  | "no_billing_account"
+  /** Stripe の API キー・Price が設定されていない */
+  | "billing_unavailable";
 
 export type Result<T> =
   { ok: true; value: T } | { ok: false; reason: Failure };

@@ -6,6 +6,8 @@
  * 4. 最後の Owner は削除・降格できない → 組織の行をロックしてから Owner の
  *    人数を数える（同時に 2 人の Owner がお互いを降格しても、どちらかは失敗する）
  * 6. 権限の変更は、変更と同じトランザクションで監査ログに残す
+ * 5. Free プランでスタッフが上限なら招待できない → plan-limits.canAddStaff
+ *    （受諾の時点でも確かめる。invitations.ts）
  */
 import { buildInvitationMail } from "@/server/auth-mails";
 import { runInTransaction } from "@/server/db";
@@ -38,6 +40,7 @@ import {
   canChangeRole,
   canInvite,
   canRemoveMember,
+  canViewBilling,
   changeableRoles,
   invitableRoles,
 } from "@/server/services/authz";
@@ -47,6 +50,11 @@ import {
   type Dispatch,
 } from "@/server/services/jobs";
 import type { OrgContext } from "@/server/services/org-context";
+import {
+  canAddStaff,
+  getPlanUsage,
+  type PlanUsage,
+} from "@/server/services/plan-limits";
 import { fail, ok, type Result } from "@/server/services/result";
 import type { InvitationInput } from "@/server/validation/organization";
 
@@ -80,6 +88,8 @@ export type MembersPage = {
   invitations: InvitationListItem[];
   /** 招待で選べるロール。空なら招待できない */
   inviteRoles: Role[];
+  /** プランとスタッフの上限（料金プランを閲覧できる Owner・Admin だけ） */
+  planUsage: PlanUsage | null;
 };
 
 /**
@@ -92,11 +102,14 @@ export async function getMembersPage(
   now: Date,
 ): Promise<MembersPage> {
   const inviteRoles = invitableRoles(ctx.role);
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, planUsage] = await Promise.all([
     listMembers(ctx.organizationId),
     inviteRoles.length > 0
       ? listPendingInvitations(ctx.organizationId, now)
       : Promise.resolve([]),
+    canViewBilling(ctx.role)
+      ? getPlanUsage(ctx.organizationId)
+      : Promise.resolve(null),
   ]);
   return {
     members: members.map((m) => {
@@ -121,6 +134,7 @@ export async function getMembersPage(
       canCancel: canCancelInvitation(ctx.role, i.role),
     })),
     inviteRoles,
+    planUsage,
   };
 }
 
@@ -259,6 +273,11 @@ export async function inviteMember(
       (await findMember(ctx.organizationId, userId, tx))
     ) {
       return fail("already_member");
+    }
+    // 上限に達していれば、受諾できない招待を送らない（受諾の時点でも
+    // 確かめる。招待中の人数は数えないので、招待が上限を超えることはある）
+    if (!(await canAddStaff(ctx.organizationId, tx))) {
+      return fail("plan_limit");
     }
     await cancelPendingInvitationsForEmail(
       ctx.organizationId,

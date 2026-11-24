@@ -1,6 +1,9 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { type Db, getPrisma } from "@/server/db";
 
+/** ユーザーではない操作者：Stripe の Webhook による変更 */
+export const STRIPE_ACTOR_ID = "system:stripe";
+
 export type AuditLogEntry = {
   organizationId: string;
   actorUserId: string;

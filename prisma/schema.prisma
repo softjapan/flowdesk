@@ -322,18 +322,48 @@ model Job {
   @@map("job")
 }
 
+/// 組織の契約（F-14、docs/billing.md）。課金の単位は組織で、1 組織 1 行。
+/// 行がない組織は Free。Stripe の状態は Webhook でだけ書き換える
 model Subscription {
   id                   String       @id @default(cuid())
   organizationId       String       @unique
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// Checkout の前にサーバーが作る Stripe の顧客（Webhook はこれで組織を引く）
   stripeCustomerId     String?      @unique
   stripeSubscriptionId String?      @unique
-  /// free | pro
+  /// free | pro。機能制限はこの値で判定する
   plan                 String       @default("free")
+  /// Stripe のサブスクリプションの status（none は申し込み前）
   status               String
   currentPeriodEnd     DateTime?    @db.Timestamptz(3)
+  /// 期間の終わりに解約する予約（カスタマーポータルで解約した）
+  cancelAtPeriodEnd    Boolean      @default(false)
+  stripePriceId        String?
+  /// 反映した最後のイベントの作成日時（Stripe の event.created）。
+  /// これより古いイベントが後から届いても反映しない
+  lastEventAt          DateTime?    @db.Timestamptz(3)
 
   @@map("subscription")
+}
+
+/// 受け取った Stripe のイベント（Webhook の冪等性）。同じイベントが
+/// 2 回届いても、主キーの一意制約で 2 回目は処理しない。
+/// 処理と同じトランザクションで作るので、処理に失敗したら残らない
+/// （Stripe の再送で処理し直す）
+model StripeEvent {
+  /// Stripe のイベント ID（evt_...）
+  id             String   @id
+  type           String
+  /// 組織が分からないイベント（対象外の種類・知らない顧客）は null
+  organizationId String?
+  /// applied（反映した）・stale（より新しいイベントを反映済み）・ignored（対象外）
+  result         String
+  /// Stripe がイベントを作った日時（event.created）
+  createdAt      DateTime @db.Timestamptz(3)
+  receivedAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([organizationId, createdAt])
+  @@map("stripeEvent")
 }
 
 model AuditLog {

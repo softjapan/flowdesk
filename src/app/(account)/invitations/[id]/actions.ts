@@ -18,7 +18,15 @@ export async function acceptInvitationAction(id: string) {
     requireId(id),
     new Date(),
   );
-  if (!result.ok) notFound();
+  if (!result.ok) {
+    // プランの上限は、招待を残したまま理由を表示する（Pro にした後で受諾できる）
+    if (result.reason === "plan_limit") {
+      redirect(
+        `/invitations/${encodeURIComponent(id)}?error=plan_limit`,
+      );
+    }
+    notFound();
+  }
   redirect(`/${result.value.slug}`);
 }
 

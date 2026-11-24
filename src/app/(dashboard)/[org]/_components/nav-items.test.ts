@@ -5,16 +5,25 @@ const keysFor = (role: "owner" | "admin" | "staff") =>
   navItemsFor(role).map((item) => item.key);
 
 describe("navItemsFor（docs/screens.md の権限列）", () => {
-  it("Owner・Admin には、メンバー管理と監査ログも出す", () => {
-    for (const role of ["owner", "admin"] as const) {
-      expect(keysFor(role)).toEqual([
-        "dashboard",
-        "reservations",
-        "customers",
-        "members",
-        "audit-logs",
-      ]);
-    }
+  it("Owner には、メンバー管理・監査ログ・料金プランも出す", () => {
+    expect(keysFor("owner")).toEqual([
+      "dashboard",
+      "reservations",
+      "customers",
+      "members",
+      "audit-logs",
+      "billing",
+    ]);
+  });
+
+  it("Admin には、料金プラン（S-14 は Owner のみ）を出さない", () => {
+    expect(keysFor("admin")).toEqual([
+      "dashboard",
+      "reservations",
+      "customers",
+      "members",
+      "audit-logs",
+    ]);
   });
 
   it("Staff には全ロール向けの 3 画面だけを出す", () => {

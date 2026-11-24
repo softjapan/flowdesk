@@ -18,6 +18,7 @@ import {
   lockOrganization,
 } from "@/server/repositories/organizations";
 import { findUserById } from "@/server/repositories/users";
+import { canAddStaff } from "@/server/services/plan-limits";
 import { fail, ok, type Result } from "@/server/services/result";
 
 export type InvitationState =
@@ -71,7 +72,9 @@ export async function getInvitationForUser(
 /**
  * 招待を受けてメンバーになる。予約の担当に選べるよう、スタッフ情報も作る。
  * すでにメンバーなら招待を受諾済みにするだけで、ロールは変えない
- * （招待のリンクでロールを上書きさせない）
+ * （招待のリンクでロールを上書きさせない）。
+ * Free プランでスタッフが上限（2 人）に達していれば plan_limit
+ * （docs/authz-matrix.md のテストケース 5）
  */
 export async function acceptInvitation(
   userId: string,
@@ -91,6 +94,16 @@ export async function acceptInvitation(
     if (!(await lockOrganization(organizationId, tx))) {
       return fail("not_found");
     }
+    const alreadyMember = await findMember(
+      organizationId,
+      userId,
+      tx,
+    );
+    // プランの上限（F-15）。招待は残すので、Pro にした後で受諾できる。
+    // 組織をロックした後に数えるので、同時の受諾でも上限を超えない
+    if (!alreadyMember && !(await canAddStaff(organizationId, tx))) {
+      return fail("plan_limit");
+    }
     // 同時に受諾・取り消しされたときは、先に変えた方だけが通る
     const accepted = await transitionInvitation(
       organizationId,
@@ -100,7 +113,7 @@ export async function acceptInvitation(
       tx,
     );
     if (!accepted) return fail("not_found");
-    if (await findMember(organizationId, userId, tx)) {
+    if (alreadyMember) {
       return ok({ slug: invitation.organization.slug });
     }
     const member = await createMember(

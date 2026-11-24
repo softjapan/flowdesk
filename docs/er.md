@@ -26,6 +26,7 @@ erDiagram
     customer ||--o{ attachment : has
     organization ||--o{ customerExport : has
     organization ||--o{ job : has
+    organization ||--o{ stripeEvent : "receives"
 
     organization {
         string id PK
@@ -117,11 +118,22 @@ erDiagram
     subscription {
         string id PK
         string organizationId FK,UK
-        string stripeCustomerId
-        string stripeSubscriptionId
+        string stripeCustomerId UK
+        string stripeSubscriptionId UK
         string plan "free | pro"
-        string status
+        string status "none（申し込み前）| Stripe の status"
         datetime currentPeriodEnd
+        boolean cancelAtPeriodEnd
+        string stripePriceId
+        datetime lastEventAt "反映した最後の event.created"
+    }
+    stripeEvent {
+        string id PK "Stripe のイベント ID"
+        string type
+        string organizationId "組織が分からなければ null"
+        string result "applied | stale | ignored"
+        datetime createdAt "event.created"
+        datetime receivedAt
     }
     auditLog {
         string id PK
@@ -144,6 +156,15 @@ erDiagram
 - 3 回失敗すると `failed` になり、メッセージは DLQ に移る（`docker/elasticmq.conf`）
 - `job` は Worker がすべての組織について処理するため ID で引く。組織のデータは payload の `organizationId` で絞り込んで読む
 - 送ったメールの本文（パスワード再設定のリンクなど）は、送信後に `payload` から消す
+
+## 料金プラン（第12章、マイグレーション `20261124174511_billing`）
+
+設計は `docs/billing.md`。
+
+- `subscription` は組織ごとに 1 行（課金の単位は組織）。行がない組織は Free。`plan` は Webhook でだけ書き換える
+- `stripeEvent` は受け取った Stripe のイベントの記録（Webhook の冪等性）。イベント ID が主キーで、反映と同じトランザクションで作る
+- Webhook は組織の文脈を持たずに届くので、`subscription` を Stripe の顧客 ID（`stripeCustomerId`、一意）で引く。顧客はサーバーが組織ごとに作るので、顧客 ID が組織を決める（`job` を ID で引くのと同じ例外。`src/server/repositories/subscriptions.ts`）
+- `stripeEvent.organizationId` には外部キーを付けない（組織を削除しても、受け取ったイベントの記録は残す）
 
 ## テナント分離の方式（第10章）
 

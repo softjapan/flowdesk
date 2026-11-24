@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ROLE_LABELS } from "@/server/domain";
+import { failureMessage } from "@/server/request-context";
 import { getInvitationForUser } from "@/server/services/invitations";
 import { getCurrentUserId, getSession } from "@/server/session";
 import { idSchema } from "@/server/validation/form";
@@ -56,10 +57,15 @@ function Message({
 
 async function Invitation({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<
+    Record<string, string | string[] | undefined>
+  >;
 }) {
   const { id } = await params;
+  const { error } = await searchParams;
   const userId = await getCurrentUserId();
   const parsed = idSchema.safeParse(id);
   const invitation = parsed.success
@@ -122,25 +128,33 @@ async function Invitation({
               有効期限：{dateFormat.format(invitation.expiresAt)}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex gap-3">
-            <form
-              action={acceptInvitationAction.bind(
-                null,
-                invitation.id,
-              )}
-            >
-              <Button type="submit">参加する</Button>
-            </form>
-            <form
-              action={rejectInvitationAction.bind(
-                null,
-                invitation.id,
-              )}
-            >
-              <Button type="submit" variant="outline">
-                辞退する
-              </Button>
-            </form>
+          <CardContent className="space-y-3">
+            {error === "plan_limit" && (
+              <p role="alert" className="text-sm text-destructive">
+                {failureMessage("plan_limit")}
+                組織の管理者に連絡してください。
+              </p>
+            )}
+            <div className="flex gap-3">
+              <form
+                action={acceptInvitationAction.bind(
+                  null,
+                  invitation.id,
+                )}
+              >
+                <Button type="submit">参加する</Button>
+              </form>
+              <form
+                action={rejectInvitationAction.bind(
+                  null,
+                  invitation.id,
+                )}
+              >
+                <Button type="submit" variant="outline">
+                  辞退する
+                </Button>
+              </form>
+            </div>
           </CardContent>
         </Card>
       );
@@ -150,12 +164,13 @@ async function Invitation({
 // S-05 招待の受諾
 export default function InvitationPage({
   params,
+  searchParams,
 }: PageProps<"/invitations/[id]">) {
   return (
     <Suspense
       fallback={<Skeleton className="h-40 w-full" aria-hidden />}
     >
-      <Invitation params={params} />
+      <Invitation params={params} searchParams={searchParams} />
     </Suspense>
   );
 }

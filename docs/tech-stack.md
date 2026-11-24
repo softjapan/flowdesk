@@ -37,7 +37,7 @@
 | 型定義 | @types/pg | 8.23.1 | dev。テスト用 DB の作成（`test/db-global-setup.ts`）で `pg` を直接使う |
 | メール | nodemailer | 10.6.1 | 第8章。SMTP でメールを送る（ローカルは Mailpit、本番は SES の SMTP）。型定義を同梱するので `@types/nodemailer` は入れない |
 | 検証 | zod | 4.6.7 | |
-| 決済 | stripe | 23.2.0 | テストモードのみ使用 |
+| 決済 | stripe | 23.2.0 | 第12章。テストモードのみ使用。SDK の既定の API バージョンは `2026-11-18.endive`。Better Auth の Stripe プラグイン（`@better-auth/stripe`）は使わず、この SDK を直接使う（理由は `docs/billing.md`） |
 | AWS | @aws-sdk/client-s3 / client-sqs | 3.1175.0 | 第11章。S3（添付ファイル・CSV）と SQS（ジョブのキュー） |
 | AWS | @aws-sdk/s3-request-presigner | 3.1175.0 | 第11章。S3 の署名付き URL（ブラウザから直接 PUT・GET、有効期限 5 分）。client-s3 と同じ版にそろえる |
 | 実行 | tsx | 4.23.15 | 第11章。Worker（`npm run worker`）とスクリプト（`npm run aws:setup`）を TypeScript のまま動かす。Node 24 の型の除去だけでは `@/` の import（tsconfig の paths）を解決できないため。本番の Worker も使うので dependencies に入れる |
@@ -74,3 +74,5 @@
 24. **RustFS 1.0.6 は、バケット作成の `LocationConstraint` が自分のリージョン（既定 `us-east-1`）以外だと `InvalidLocationConstraint` で拒否する。** SDK はリージョンが `us-east-1` 以外のとき `ap-northeast-1` を自動で付けるので、`scripts/setup-local-aws.ts` は `us-east-1` を明示する（AWS の S3 では「指定なし」を意味する値で、型の候補にないため型を合わせる）（第11章）。
 25. **`package.json` に `"type": "module"` がないので、tsx は `.ts` を CommonJS として変換し、トップレベルの `await` が使えない。** Worker とスクリプトは `main()` を呼ぶ形にする（第11章）。
 26. **ElasticMQ 1.7.1 の `maxReceiveCount = 3` では、3 回受信して削除されなかったメッセージが、次に受信されるときに DLQ（`flowdesk-jobs-dlq`）へ移る。** Worker は 3 回目の失敗でメッセージを消さずに置く。SMTP に接続できない状態で、1・2 回目の失敗の後に再試行し、3 回目の後に DLQ へ移ることを確認した（第11章）。
+27. **`@better-auth/stripe`（1.7.27）の Webhook は、イベント ID を記録せず、届いた順に上書きする。** 同じイベントの 2 回目でもコールバックが実行され、古い `customer.subscription.updated` が後から届くと古い状態に戻る。入口も `/api/auth/stripe/webhook` に固定される。FlowDesk は使わず、`stripe` を直接使って `stripeEvent` の一意制約と `event.created` の比較で扱う（第12章、`docs/billing.md`）
+28. **stripe 23.2.0 は `Stripe.webhooks` を静的に持つので、Webhook の署名の検証に API キーは要らない。** `Stripe.webhooks.generateTestHeaderString` で、Stripe と同じ方式で署名した本文を作れるので、Stripe CLI なしで署名の検証・冪等性・順番の入れ替わりをテストできる。期間の終わり（`current_period_end`）はサブスクリプションではなく項目（`items.data[]`）にある（第12章）

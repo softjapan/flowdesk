@@ -24,8 +24,8 @@ Better Auth の organization プラグインの既定ロールは `owner` / `adm
 | 添付ファイル | アップロード・閲覧 | ○ | ○ | ○ | 署名付き URL の有効期限は 5 分 |
 | 予約 | 閲覧 | ○ | ○ | ○ | |
 | 予約 | 作成・変更・キャンセル | ○ | ○ | △ | Staff は自分が担当の予約のみ |
-| 料金プラン | 閲覧 | ○ | ○ | － | |
-| 料金プラン | 変更・解約 | ○ | － | － | |
+| 料金プラン | 閲覧 | ○ | ○ | － | Admin はメンバー管理（S-13）で上限の使用状況を見る。S-14 の画面は Owner のみ |
+| 料金プラン | 変更・解約 | ○ | － | － | Checkout・カスタマーポータル（`docs/billing.md`） |
 | 監査ログ | 閲覧 | ○ | ○ | － | |
 | ダッシュボード | 売上の表示 | ○ | ○ | － | Staff には予約数のみ表示 |
 
@@ -38,4 +38,7 @@ Better Auth の organization プラグインの既定ロールは `owner` / `adm
 3. Admin が自分を Owner に昇格できない
 4. 最後の Owner を削除・降格できない
 5. Free プランで 3 人目のスタッフを追加できない
+   - 「スタッフ」は有効な `staffProfile` の数（Staff ロールに限らない）。招待（`inviteMember`）と招待の受諾（`acceptInvitation`）の両方で拒否する（`plan_limit`）。受諾は組織をロックしてから数えるので、同時に受諾しても上限を超えない
+   - 店舗（Free は 1 つまで）も `createLocation` で同じく拒否する
+   - `src/server/services/billing.db.test.ts`（第12章）
 6. 権限変更が監査ログに記録される

@@ -14,6 +14,37 @@ export async function listLocations(
   });
 }
 
+export async function countLocations(
+  organizationId: string,
+  db: Db = getPrisma(),
+): Promise<number> {
+  return db.location.count({ where: { organizationId } });
+}
+
+export async function createLocation(
+  organizationId: string,
+  data: { name: string; timezone: string },
+  db: Db = getPrisma(),
+) {
+  return db.location.create({
+    data: { ...data, organizationId },
+    select: { id: true },
+  });
+}
+
+/**
+ * プランの上限（F-15）で数えるスタッフ。メンバーを削除して無効に
+ * なったスタッフ情報（予約の履歴のために残している）は数えない
+ */
+export async function countActiveStaffProfiles(
+  organizationId: string,
+  db: Db = getPrisma(),
+): Promise<number> {
+  return db.staffProfile.count({
+    where: { organizationId, active: true, memberId: { not: null } },
+  });
+}
+
 /** 有効なスタッフのみ */
 export async function listStaffProfiles(
   organizationId: string,

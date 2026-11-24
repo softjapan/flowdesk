@@ -450,6 +450,7 @@ const tables = [
   "customerExport",
   "auditLog",
   "subscription",
+  "stripeEvent",
   "attachment",
   "reservation",
   "customer",

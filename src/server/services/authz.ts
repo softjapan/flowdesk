@@ -71,6 +71,21 @@ export function canViewRevenue(role: Role): boolean {
   return can(role, { dashboard: ["revenue"] });
 }
 
+/** 店舗・メニュー／作成：Owner・Admin */
+export function canCreateCatalog(role: Role): boolean {
+  return can(role, { catalog: ["create"] });
+}
+
+/** 料金プラン／閲覧：Owner・Admin（プランと上限の使用状況） */
+export function canViewBilling(role: Role): boolean {
+  return can(role, { billing: ["read"] });
+}
+
+/** 料金プラン／変更・解約：Owner のみ（S-14 の Checkout・カスタマーポータル） */
+export function canManageBilling(role: Role): boolean {
+  return can(role, { billing: ["update"] });
+}
+
 /** 監査ログ／閲覧：Owner・Admin */
 export function canViewAuditLogs(role: Role): boolean {
   return can(role, { auditLog: ["read"] });
