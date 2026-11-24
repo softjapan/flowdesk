@@ -28,7 +28,9 @@ export type Failure =
   /** Stripe の顧客がまだない（Pro に申し込んだことがない） */
   | "no_billing_account"
   /** Stripe の API キー・Price が設定されていない */
-  | "billing_unavailable";
+  | "billing_unavailable"
+  /** 予約で使われている店舗・メニューは削除できない */
+  | "in_use";
 
 export type Result<T> =
   { ok: true; value: T } | { ok: false; reason: Failure };

@@ -31,6 +31,8 @@ Better Auth の organization プラグインの既定ロールは `owner` / `adm
 
 ## テストで必ず確認するケース（第13・14章）
 
+表の各行（ロールごとの可否）は `src/server/services/services.test.ts` の「認可マトリクスの表」で 1 行ずつ確かめる。テストの分担は `docs/testing.md`。
+
 1. 組織 A のメンバーが、組織 B の顧客 ID を URL・Server Action の引数・Route Handler のパスに入れても 404 になる（存在を漏らさないため 403 ではなく 404）
    - 画面（ページ）は Cache Components によりシェルの送信後に判定するため、HTTP ステータスは 200 のまま「見つかりません」を表示し、`noindex` が付く（第5章で確認）。確認するのは、ステータスではなく「データが含まれないこと」
    - Server Action と Route Handler は 404 を返す
@@ -39,6 +41,6 @@ Better Auth の organization プラグインの既定ロールは `owner` / `adm
 4. 最後の Owner を削除・降格できない
 5. Free プランで 3 人目のスタッフを追加できない
    - 「スタッフ」は有効な `staffProfile` の数（Staff ロールに限らない）。招待（`inviteMember`）と招待の受諾（`acceptInvitation`）の両方で拒否する（`plan_limit`）。受諾は組織をロックしてから数えるので、同時に受諾しても上限を超えない
-   - 店舗（Free は 1 つまで）も `createLocation` で同じく拒否する
-   - `src/server/services/billing.db.test.ts`（第12章）
+   - 店舗（Free は 1 つまで）も `createLocation` で同じく拒否する。Pro から Free に戻った組織は、上限を超えた店舗も変更・削除できる
+   - `src/server/services/billing.db.test.ts`（第12章）、`src/server/services/catalog.db.test.ts`（第13章）
 6. 権限変更が監査ログに記録される

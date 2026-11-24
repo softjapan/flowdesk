@@ -71,9 +71,9 @@ export function canViewRevenue(role: Role): boolean {
   return can(role, { dashboard: ["revenue"] });
 }
 
-/** 店舗・メニュー／作成：Owner・Admin */
-export function canCreateCatalog(role: Role): boolean {
-  return can(role, { catalog: ["create"] });
+/** 店舗・メニュー／作成・編集・削除：Owner・Admin（閲覧は全ロール） */
+export function canManageCatalog(role: Role): boolean {
+  return can(role, { catalog: ["create", "update", "delete"] });
 }
 
 /** 料金プラン／閲覧：Owner・Admin（プランと上限の使用状況） */

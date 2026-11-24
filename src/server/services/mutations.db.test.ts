@@ -2,8 +2,9 @@
  * 更新系の Service のテスト（F-07・F-08・F-09、docs/authz-matrix.md の
  * 「テストで必ず確認するケース」1・2）。テスト用 DB を使う（npm run test:db）。
  *
- * 他のテストファイルがシードの件数を見るので、作った行は消し、
- * 変えた行は戻す。作る予約はシードの範囲外（2027 年）に置く。
+ * このファイル専用の DB（test/db-per-file.ts）を使う。同じファイルの
+ * 中のテストは順に実行されるので、作った行は消し、変えた行は戻す。
+ * 作る予約はシードの範囲外（2027 年）に置く。
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { getPrisma } from "@/server/db";
@@ -164,6 +165,17 @@ describe("顧客（F-07）", () => {
       where: { id, organizationId: ORG_A },
     });
     expect(row?.deletedAt).toEqual(TEST_NOW);
+    // 削除した人が監査ログに残る
+    expect(
+      await getPrisma().auditLog.findMany({
+        where: {
+          organizationId: ORG_A,
+          action: "customer.delete",
+          targetId: id,
+        },
+        select: { actorUserId: true },
+      }),
+    ).toEqual([{ actorUserId: "user_a1" }]);
   });
 });
 
@@ -221,6 +233,25 @@ describe("予約の作成（F-08）", () => {
       status: "confirmed",
       version: 1,
     });
+  });
+
+  it("作成とキャンセルは、操作した人と一緒に監査ログに残る", async () => {
+    const date = nextDate();
+    const ctx = await staff();
+    const id = await reserveOk(ctx, {
+      date,
+      staffProfileId: "stf_a2",
+    });
+    expect((await cancelReservation(ctx, id, 1)).ok).toBe(true);
+    const logs = await getPrisma().auditLog.findMany({
+      where: { organizationId: ORG_A, targetId: id },
+      orderBy: { createdAt: "asc" },
+      select: { action: true, actorUserId: true },
+    });
+    expect(logs).toEqual([
+      { action: "reservation.create", actorUserId: "user_a2" },
+      { action: "reservation.cancel", actorUserId: "user_a2" },
+    ]);
   });
 
   it("他の組織の顧客・メニュー・スタッフ・店舗は not_found", async () => {

@@ -5,11 +5,13 @@ const keysFor = (role: "owner" | "admin" | "staff") =>
   navItemsFor(role).map((item) => item.key);
 
 describe("navItemsFor（docs/screens.md の権限列）", () => {
-  it("Owner には、メンバー管理・監査ログ・料金プランも出す", () => {
+  it("Owner には、メニュー・店舗・メンバー管理・監査ログ・料金プランも出す", () => {
     expect(keysFor("owner")).toEqual([
       "dashboard",
       "reservations",
       "customers",
+      "services",
+      "locations",
       "members",
       "audit-logs",
       "billing",
@@ -21,6 +23,8 @@ describe("navItemsFor（docs/screens.md の権限列）", () => {
       "dashboard",
       "reservations",
       "customers",
+      "services",
+      "locations",
       "members",
       "audit-logs",
     ]);

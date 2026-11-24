@@ -8,6 +8,7 @@ import {
   toZonedYmd,
   zonedToUtc,
 } from "@/lib/datetime";
+import { formatYen } from "@/lib/money";
 import { ROLE_LABELS } from "@/server/domain";
 import { PLANS } from "@/server/plans";
 import { toRole } from "@/server/access-control";
@@ -36,6 +37,7 @@ export const AUDIT_TARGET_LABELS: Record<string, string> = {
   attachment: "添付ファイル",
   customerExport: "CSV エクスポート",
   location: "店舗",
+  service: "メニュー",
   subscription: "料金プラン",
 };
 
@@ -55,6 +57,11 @@ const actionLabels: Record<string, string> = {
   "reservation.update": "予約の変更",
   "reservation.cancel": "予約のキャンセル",
   "location.create": "店舗の作成",
+  "location.update": "店舗の編集",
+  "location.delete": "店舗の削除",
+  "service.create": "メニューの作成",
+  "service.update": "メニューの編集",
+  "service.delete": "メニューの削除",
   "subscription.update": "料金プランの変更（Stripe）",
 };
 
@@ -133,7 +140,11 @@ export function describeAuditDiff(
     case "organization.create":
       return `${String(diff.name)}（/${String(diff.slug)}）`;
     case "location.create":
+    case "location.delete":
+    case "service.delete":
       return String(diff.name);
+    case "service.create":
+      return `${String(diff.name)}（${String(diff.durationMinutes)} 分・${Number.isInteger(diff.priceYen) ? formatYen(diff.priceYen as number) : String(diff.priceYen)}）`;
     case "subscription.update":
       if (isRecord(diff.from) && isRecord(diff.to)) {
         return `${planLabel(diff.from.plan)} → ${planLabel(diff.to.plan)}（${String(diff.to.status)}）`;

@@ -9,6 +9,7 @@
 - 要件と用語：`docs/requirements.md`
 - 権限：`docs/authz-matrix.md`（認可の判断はこの表を正とする）
 - データ構造：`docs/er.md`
+- テストの分担：`docs/testing.md`
 - 使ってよいライブラリと版：`docs/tech-stack.md`（表にない依存を追加するときは、先に提案して確認を取る）
 
 ## コマンド
@@ -17,6 +18,7 @@
 - 型チェック：`npm run typecheck`
 - Lint：`npm run lint`
 - 単体テスト：`npm test`
+- DB を使うテスト：`npm run test:db`、E2E：`npm run test:e2e`（分担は `docs/testing.md`）
 - 完了前に必ず実行する：`npm run check`（型チェック・Lint・テストをまとめて実行）
 
 ## 設計のルール

@@ -7,14 +7,22 @@ import {
   can,
   canChangeRole,
   canDeleteCustomer,
+  canEditCustomer,
+  canExportCustomers,
   canInvite,
+  canManageBilling,
+  canManageCatalog,
   canManageReservation,
+  canReadAttachment,
   canRemoveMember,
+  canUploadAttachment,
   canViewAuditLogs,
+  canViewBilling,
   canViewRevenue,
   changeableRoles,
   invitableRoles,
 } from "@/server/services/authz";
+import type { Role } from "@/server/domain";
 import { parseCustomerListQuery } from "@/server/services/customers";
 import { parseCalendarQuery } from "@/server/services/reservations";
 
@@ -78,6 +86,73 @@ describe("authz（docs/authz-matrix.md）", () => {
     );
     // スタッフ情報のない Staff は何も操作できない
     expect(canManageReservation("staff", "stf_1", null)).toBe(false);
+  });
+});
+
+/**
+ * docs/authz-matrix.md の表を 1 行ずつ写したもの。表を変えたら、ここと
+ * src/server/access-control.ts を一緒に変える（どちらかだけ変えると落ちる）。
+ * △（担当・相手のロールで決まる）は下の個別のテストで確かめる
+ */
+const matrix: [string, (role: Role) => boolean, Role[]][] = [
+  [
+    "組織／名前の変更",
+    (r) => can(r, { organization: ["update"] }),
+    ["owner", "admin"],
+  ],
+  [
+    "組織／削除",
+    (r) => can(r, { organization: ["delete"] }),
+    ["owner"],
+  ],
+  [
+    "メンバー／招待",
+    (r) => invitableRoles(r).length > 0,
+    ["owner", "admin"],
+  ],
+  [
+    "店舗・メニュー／閲覧",
+    (r) => can(r, { catalog: ["read"] }),
+    ["owner", "admin", "staff"],
+  ],
+  [
+    "店舗・メニュー／作成・編集・削除",
+    canManageCatalog,
+    ["owner", "admin"],
+  ],
+  [
+    "顧客／閲覧・検索",
+    (r) => can(r, { customer: ["read"] }),
+    ["owner", "admin", "staff"],
+  ],
+  ["顧客／作成・編集", canEditCustomer, ["owner", "admin", "staff"]],
+  ["顧客／削除", canDeleteCustomer, ["owner", "admin"]],
+  ["顧客／CSV エクスポート", canExportCustomers, ["owner", "admin"]],
+  [
+    "添付ファイル／アップロード",
+    canUploadAttachment,
+    ["owner", "admin", "staff"],
+  ],
+  [
+    "添付ファイル／閲覧",
+    canReadAttachment,
+    ["owner", "admin", "staff"],
+  ],
+  [
+    "予約／閲覧",
+    (r) => can(r, { reservation: ["read"] }),
+    ["owner", "admin", "staff"],
+  ],
+  ["料金プラン／閲覧", canViewBilling, ["owner", "admin"]],
+  ["料金プラン／変更・解約", canManageBilling, ["owner"]],
+  ["監査ログ／閲覧", canViewAuditLogs, ["owner", "admin"]],
+  ["ダッシュボード／売上の表示", canViewRevenue, ["owner", "admin"]],
+];
+
+describe("認可マトリクスの表（docs/authz-matrix.md）", () => {
+  it.each(matrix)("%s", (_name, allowed, expected) => {
+    const roles: Role[] = ["owner", "admin", "staff"];
+    expect(roles.filter((r) => allowed(r))).toEqual(expected);
   });
 });
 

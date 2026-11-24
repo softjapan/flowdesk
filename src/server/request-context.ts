@@ -63,6 +63,8 @@ export function failureMessage(
       return "すでに Pro プランです。プランの変更・解約はカスタマーポータルで行ってください。";
     case "no_billing_account":
       return "まだお支払いの情報がありません。Pro プランに申し込むと、カスタマーポータルを使えます。";
+    case "in_use":
+      return "予約で使われているため削除できません。名前を変えて使い続けてください。";
     case "billing_unavailable":
       return "課金の設定が完了していないため、現在は申し込めません。";
   }

@@ -1,53 +1,59 @@
 /**
- * npm run test:db の前に 1 回だけ実行する。
- * 1. テスト用 DB がなければ作る
+ * npm run test:db の前に 1 回だけ実行する。テンプレートの DB を作る：
+ * 1. テスト用 DB（TEST_DATABASE_URL、既定は flowdesk_test）がなければ作る
  * 2. マイグレーションを当てる（prisma migrate deploy。リセットはしない）
  * 3. 全テーブルを空にして、TEST_NOW を基準にシードを入れる
+ *
+ * テストはこの DB を直接使わない。テストファイルごとに、この DB を
+ * テンプレートにした DB を作って使う（test/db-per-file.ts）。
+ * 前回の実行が途中で止まって残った複製は、ここで消す。
  */
 import { execFileSync } from "node:child_process";
-import { Client } from "pg";
 import { seedDatabase } from "../prisma/seed-data";
 import { createPrismaClient } from "../src/server/db";
+import {
+  databaseName,
+  dropDatabase,
+  ensureDatabase,
+  withAdminClient,
+  withDatabase,
+} from "./db-admin";
 import { TEST_NOW } from "./db-fixture";
 
-async function ensureDatabase(url: URL): Promise<void> {
-  const name = decodeURIComponent(url.pathname.slice(1));
-  if (!/^\w+$/.test(name)) {
-    throw new Error(`テスト用 DB の名前が不正: ${name}`);
-  }
-  const admin = new URL(url);
-  admin.pathname = "/postgres";
-  const client = new Client({ connectionString: admin.toString() });
-  await client.connect();
-  try {
-    const { rowCount } = await client.query(
-      "SELECT 1 FROM pg_database WHERE datname = $1",
-      [name],
-    );
-    if (rowCount === 0) {
-      await client.query(`CREATE DATABASE "${name}"`);
-    }
-  } finally {
-    await client.end();
+async function dropLeftoverCopies(
+  templateUrl: string,
+): Promise<void> {
+  const prefix = `${databaseName(templateUrl)}_f`;
+  const { rows } = await withAdminClient(templateUrl, (client) =>
+    client.query<{ datname: string }>(
+      "SELECT datname FROM pg_database WHERE starts_with(datname, $1)",
+      [prefix],
+    ),
+  );
+  for (const { datname } of rows) {
+    await dropDatabase(withDatabase(templateUrl, datname));
   }
 }
 
 export default async function setup(): Promise<void> {
-  const testDatabaseUrl = process.env.TEST_DATABASE_URL;
-  if (!testDatabaseUrl) {
+  const templateUrl = process.env.TEST_DATABASE_URL;
+  if (!templateUrl) {
     throw new Error("TEST_DATABASE_URL が設定されていない");
   }
-  await ensureDatabase(new URL(testDatabaseUrl));
+  await ensureDatabase(templateUrl);
+  await dropLeftoverCopies(templateUrl);
 
   execFileSync("npx", ["prisma", "migrate", "deploy"], {
-    env: { ...process.env, DATABASE_URL: testDatabaseUrl },
+    env: { ...process.env, DATABASE_URL: templateUrl },
     stdio: "inherit",
   });
 
-  const prisma = createPrismaClient(testDatabaseUrl);
+  const prisma = createPrismaClient(templateUrl);
   try {
     await seedDatabase(prisma, TEST_NOW);
   } finally {
+    // テンプレートに接続が残っていると、複製（CREATE DATABASE ...
+    // TEMPLATE）が "being accessed by other users" で失敗する
     await prisma.$disconnect();
   }
 }

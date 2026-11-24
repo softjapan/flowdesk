@@ -9,8 +9,9 @@ export default defineConfig({
     },
   },
   test: {
-    // DB を使うテストは npm run test:db（vitest.db.config.mts）で実行する。
+    // DB を使うテストは npm run test:db（vitest.db.config.mts）、
+    // E2E（e2e/）は npm run test:e2e（Playwright）で実行する。
     // npm test と npm run check は DB なしで通るようにする
-    exclude: [...configDefaults.exclude, "**/*.db.test.ts"],
+    exclude: [...configDefaults.exclude, "**/*.db.test.ts", "e2e/**"],
   },
 });

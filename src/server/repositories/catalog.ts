@@ -32,6 +32,52 @@ export async function createLocation(
   });
 }
 
+/** 変更した行の数（0 なら他の組織の ID か、存在しない） */
+export async function updateLocation(
+  organizationId: string,
+  id: string,
+  data: { name: string; timezone: string },
+  db: Db = getPrisma(),
+): Promise<number> {
+  const { count } = await db.location.updateMany({
+    where: { id, organizationId },
+    data,
+  });
+  return count;
+}
+
+/**
+ * 予約が参照している店舗は外部キー（NoAction）で DB が拒否する
+ * （isForeignKeyViolation で判定する）。削除と同時に予約が作られても、
+ * 予約のない店舗だけが消える
+ */
+export async function deleteLocation(
+  organizationId: string,
+  id: string,
+  db: Db = getPrisma(),
+): Promise<number> {
+  const { count } = await db.location.deleteMany({
+    where: { id, organizationId },
+  });
+  return count;
+}
+
+/**
+ * 外部キーの違反（PostgreSQL の 23503）か。Prisma 7 のドライバアダプター
+ * 経由では meta.driverAdapterError.cause.originalCode に入る
+ * （isReservationOverlapError と同じ）
+ */
+export function isForeignKeyViolation(error: unknown): boolean {
+  const cause = (
+    error as {
+      meta?: {
+        driverAdapterError?: { cause?: { originalCode?: unknown } };
+      };
+    }
+  )?.meta?.driverAdapterError?.cause;
+  return cause?.originalCode === "23503";
+}
+
 /**
  * プランの上限（F-15）で数えるスタッフ。メンバーを削除して無効に
  * なったスタッフ情報（予約の履歴のために残している）は数えない
@@ -100,4 +146,47 @@ export async function listServices(
     where: { organizationId },
     orderBy: { id: "asc" },
   });
+}
+
+type ServiceData = {
+  name: string;
+  durationMinutes: number;
+  priceYen: number;
+};
+
+export async function createService(
+  organizationId: string,
+  data: ServiceData,
+  db: Db = getPrisma(),
+) {
+  return db.service.create({
+    data: { ...data, organizationId },
+    select: { id: true },
+  });
+}
+
+/** 変更した行の数（0 なら他の組織の ID か、存在しない） */
+export async function updateService(
+  organizationId: string,
+  id: string,
+  data: ServiceData,
+  db: Db = getPrisma(),
+): Promise<number> {
+  const { count } = await db.service.updateMany({
+    where: { id, organizationId },
+    data,
+  });
+  return count;
+}
+
+/** 予約が参照しているメニューは DB が拒否する（isForeignKeyViolation） */
+export async function deleteService(
+  organizationId: string,
+  id: string,
+  db: Db = getPrisma(),
+): Promise<number> {
+  const { count } = await db.service.deleteMany({
+    where: { id, organizationId },
+  });
+  return count;
 }

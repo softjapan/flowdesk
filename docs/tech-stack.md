@@ -44,7 +44,7 @@
 | Lint | eslint / eslint-config-next | 9.39.5 / 16.4.6 | テンプレートは ESLint 9（`latest` は 10 だが合わせない） |
 | 整形 | prettier | 3.10.1 | A5 判の誌面に収めるため `printWidth: 70` |
 | 単体テスト | vitest | 5.1.1 | |
-| E2E | @playwright/test | 1.65.1 | |
+| E2E | @playwright/test | 1.65.1 | 第13章。dev。ブラウザは Chromium だけを使う（`npx playwright install chromium`、Chrome Headless Shell 159）。設定は `playwright.config.ts`、方針は `docs/testing.md` |
 
 ## 動作確認で分かったこと（本文で扱う）
 
@@ -76,3 +76,9 @@
 26. **ElasticMQ 1.7.1 の `maxReceiveCount = 3` では、3 回受信して削除されなかったメッセージが、次に受信されるときに DLQ（`flowdesk-jobs-dlq`）へ移る。** Worker は 3 回目の失敗でメッセージを消さずに置く。SMTP に接続できない状態で、1・2 回目の失敗の後に再試行し、3 回目の後に DLQ へ移ることを確認した（第11章）。
 27. **`@better-auth/stripe`（1.7.27）の Webhook は、イベント ID を記録せず、届いた順に上書きする。** 同じイベントの 2 回目でもコールバックが実行され、古い `customer.subscription.updated` が後から届くと古い状態に戻る。入口も `/api/auth/stripe/webhook` に固定される。FlowDesk は使わず、`stripe` を直接使って `stripeEvent` の一意制約と `event.created` の比較で扱う（第12章、`docs/billing.md`）
 28. **stripe 23.2.0 は `Stripe.webhooks` を静的に持つので、Webhook の署名の検証に API キーは要らない。** `Stripe.webhooks.generateTestHeaderString` で、Stripe と同じ方式で署名した本文を作れるので、Stripe CLI なしで署名の検証・冪等性・順番の入れ替わりをテストできる。期間の終わり（`current_period_end`）はサブスクリプションではなく項目（`items.data[]`）にある（第12章）
+29. **Playwright 1.65.1 は `webServer` を `globalSetup` より先に起動する。** 起動の確認に `/api/health`（DB に接続できなければ 503）を使うと、E2E 用 DB を作る `globalSetup` が始まる前に待ち続ける。起動の確認には DB を使わない `/login` を使い、DB は lazy に接続する（第13章）
+30. **Playwright は TypeScript のテストと `globalSetup` を CommonJS として読み込むので、ESM の Prisma Client（生成物が `import.meta` を使う）を import できない（`Cannot use 'import.meta' outside a module`）。** E2E のシードは `npx prisma db seed`（`node prisma/seed.ts`）を別のプロセスで実行する。`pg` だけを使う処理（DB の作成）は import できる（第13章）
+31. **Better Auth は本番モード（`NODE_ENV=production`、`next start`）で既定のレート制限を有効にし、`/sign-in`・`/sign-up` は IP ごとに 10 秒に 3 回まで。** E2E は `next start` で動かすので、ログインは setup で 3 回以内にし、ほかのテストは保存したセッション（`storageState`）を使う（第13章）
+32. **Next.js 16 はルートの読み上げ用に `role="alert"` の要素（`__next-route-announcer__`）を置く。** `page.getByRole("alert")` は 2 つに一致して strict mode で失敗するので、フォームの中に絞る（第13章）
+33. **PostgreSQL の `CREATE DATABASE ... TEMPLATE` は、テンプレートに接続があると失敗する。** DB を使うテストはファイルごとにテンプレート（`flowdesk_test`）を複製して並列に実行するので、テンプレートにシードを入れた接続は閉じてから複製し、テストのワーカーはテンプレートに接続しない。複製は `DROP DATABASE ... WITH (FORCE)`（PostgreSQL 13 以降）で消す（第13章）
+34. **Prisma 7 のドライバアダプター経由の外部キー違反は、`meta.driverAdapterError.cause.originalCode` に `23503` が入る（排他制約の 23P01 と同じ場所）。** 予約が参照する店舗・メニューの削除は、件数を数えずに DB の外部キー（`NoAction`）に任せ、この値で `in_use` にする。違反はトランザクションを中断させるので、`runInTransaction` の外で受ける（第13章）

@@ -1,5 +1,5 @@
 /**
- * 店舗の入力（F-05）。タイムゾーンは IANA の名前（Asia/Tokyo など）で、
+ * 店舗の入力（F-05、S-12）。タイムゾーンは IANA の名前（Asia/Tokyo など）で、
  * 実行環境の Intl が知っているものだけを受け付ける。
  */
 import { z } from "zod";
@@ -12,6 +12,10 @@ function isTimeZone(value: string): boolean {
     return false;
   }
 }
+
+export const LOCATION_FIELDS = ["name", "timezone"] as const;
+
+export type LocationFieldName = (typeof LOCATION_FIELDS)[number];
 
 export const locationInputSchema = z.object({
   name: z

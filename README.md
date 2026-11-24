@@ -48,9 +48,10 @@ npm run worker              # 別のターミナルで。メール送信・CSV �
 | `npm run db:reset` | 開発用 DB を作り直し、マイグレーションとシードをやり直す（データはすべて消える） |
 | `npm run worker` | 非同期ジョブの Worker（SQS を受けてメールの送信・CSV の作成・前日リマインドを行う）。メールは http://localhost:8025 で確認する |
 | `npm run aws:setup` | ローカルの S3（RustFS）にバケットを作り、CORS を設定する。何度実行してもよい |
-| `npm run test:db` | DB を使うテスト。テスト用 DB（`flowdesk_test`）を自動で作り、毎回シードし直す |
+| `npm run test:db` | DB を使うテスト。テスト用 DB（`flowdesk_test`）を自動で作って毎回シードし直し、テストファイルごとに複製して並列に実行する |
+| `npm run test:e2e` | E2E（Playwright）。ビルドして http://localhost:3100 で起動し、E2E 用 DB（`flowdesk_e2e`）とバケット（`flowdesk-e2e`）を使う。初回は `npx playwright install chromium` |
 
-`npm run check` は DB なしで通る（`*.db.test.ts` は含まない）。
+`npm run check` は DB なしで通る（`*.db.test.ts` と `e2e/` は含まない）。テストの分担は `docs/testing.md`。
 
 `.env.local` の `BETTER_AUTH_SECRET` は、`openssl rand -base64 32` で作ったランダムな値に置き換える。
 

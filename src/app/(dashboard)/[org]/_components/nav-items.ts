@@ -38,6 +38,18 @@ export const navItems: readonly NavItem[] = [
     roles: all,
   },
   {
+    key: "services",
+    label: "メニュー管理",
+    segment: "services",
+    roles: ownerAdmin,
+  },
+  {
+    key: "locations",
+    label: "店舗管理",
+    segment: "locations",
+    roles: ownerAdmin,
+  },
+  {
     key: "members",
     label: "メンバー管理",
     segment: "members",
