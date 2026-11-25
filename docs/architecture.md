@@ -165,7 +165,7 @@ S3_ENDPOINT=http://localhost:9000 BETTER_AUTH_URL=http://localhost:3300 npm run 
 open http://localhost:3300
 ```
 
-migrate → web・worker の順に起動する。ECS と同じく、ルートを読み取り専用にし、capability をすべて外す。2026-11-25 に確かめたこと（ポートは実験用の `compose.override.yaml` に合わせた）：
+migrate → web・worker の順に起動する。ECS と同じく、ルートを読み取り専用にし、capability をすべて外す。2026-11-25 に確かめたこと：
 
 - migrate：5 つのマイグレーションを適用して終わる（2 回目は `No pending migrations to apply.`）。読み取り専用のルート・`/tmp` と `/home/node` だけ書き込める状態でも動く
 - web：ヘルスチェックが healthy。`/api/health` が `{"status":"ok","database":"ok"}`、`/login` が 200、HSTS・CSP などのヘッダーが付く。デモユーザーでログインでき（`/api/auth/sign-in/email` が 200）、ダッシュボード（`/demo-salon`）が 200。`/app` には書き込めず（`Read-only file system`）、`/app/.next/cache` には書ける

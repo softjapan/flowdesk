@@ -63,7 +63,7 @@ p95 は最近傍法（小さい方から 95% の位置の値、`scripts/perf/sta
 
 ```sh
 npm run build   # DATABASE_URL なし
-DATABASE_URL=postgresql://flowdesk:flowdesk@localhost:55432/flowdesk \
+DATABASE_URL=postgresql://flowdesk:flowdesk@localhost:5432/flowdesk \
 BETTER_AUTH_URL=http://localhost:3200 BETTER_AUTH_SECRET=<計測用の値> \
 SQS_QUEUE_URL="" npx next start --port 3200
 ```

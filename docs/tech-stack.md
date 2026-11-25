@@ -147,5 +147,3 @@
 62. **Terraform 1.17.2 の `terraform test` で、`map(string)` の属性（`dimensions` など）とオブジェクトの書き方 `{ k = "v" }` を `==` で比べると、値が同じでも false になる**（型が map と object で違う）。`tomap({ ... })` で比べる。`metric_query` の `return_data` は指定しないと `null` で、`for ... if q.return_data` はエラーになる（第18章）
 63. **3 回失敗して DLQ に入ったジョブは、DLQ のメッセージを本体のキューに戻すだけでは再実行されない**（DB の job が `failed` で、`runJob` が「終わった」として捨てる）。`npm run jobs:retry`（`scripts/ops/retry-failed-jobs.ts`）で DB の job を `queued` に戻してから送る（第18章、`docs/runbooks/incident-ai.md` の 6）
 64. **手元の PostgreSQL 18.7（公式のイメージ）は、`local`・`127.0.0.1` からのレプリケーションの接続を trust で許す**ので、コンテナの中で `pg_basebackup`・`pg_receivewal` を動かせる（設定の変更は要らない）。`wal_level = replica` も既定。PITR の演習は `npm run drill:restore`（第18章、`docs/runbooks/restore.md`）
-65. **第18章で、ホストの 59324 番（compose.override.yaml の SQS）が「使用中」で ElasticMQ が起動しなかった**（`lsof` では使っているプロセスが見えなかった）。override で 59325 番にずらした（override はコミットしない）
-
