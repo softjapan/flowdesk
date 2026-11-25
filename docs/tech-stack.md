@@ -1,6 +1,6 @@
 # 技術スタックと固定バージョン
 
-確認日：2026-11-23（第14・15章の追記は 2026-11-25）。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
+確認日：2026-11-23（第14〜16章の追記は 2026-11-25）。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
 `package.json` では本番依存を完全一致（`-E`）で固定し、更新は章タグを切り直すときにまとめて行う。
 
 ## 実行環境
@@ -13,7 +13,17 @@
 | RustFS（S3 互換） | 1.0.6 | ローカル開発用。MinIO は Docker Hub からイメージが消えたため使わない（後述） |
 | ElasticMQ（SQS 互換） | 1.7.1 | ローカル開発用。`softwaremill/elasticmq-native` |
 | Mailpit | 1.34.0 | ローカル開発用。SMTP を受けて Web 画面（8025）に表示 |
-| Terraform | 1.17.2 | 第16〜17章 |
+| Terraform | 1.17.2 | 第16〜17章。`infra/terraform/`（`docs/architecture.md`）。`required_version = "~> 1.17.2"` |
+| 本番のイメージの土台 | `node:24.13.0-bookworm-slim` | 第16章。`Dockerfile`（web・worker・migrate）。非 root（`node`、UID 1000） |
+
+## インフラ（Terraform のプロバイダー、第16章）
+
+`infra/terraform/envs/prod/versions.tf` で完全一致に固定し、`.terraform.lock.hcl` をコミットする。
+
+| プロバイダー | バージョン | 選定理由・注意 |
+|--------------|-----------|----------------|
+| hashicorp/aws | 6.74.0 | 2026-11-23 公開の最新（Terraform Registry で確認）。書き込み専用の属性（`password_wo`・`secret_string_wo`）を使う |
+| hashicorp/random | 3.9.1 | 第16章で追加。DB のパスワードと `BETTER_AUTH_SECRET` を `ephemeral "random_password"` で作り、state に残さない。CloudFront → ALB のヘッダーの値（`random_password`、state に残る）。手元で値を作るだけで、どこにも接続しない |
 
 ## アプリケーション
 
@@ -91,3 +101,10 @@
 41. **Next.js 16.4.6 で `partialPrefetching: true` にすると、Cookie を読むページは 1 回のリクエストで 2 回描画される。** ページの描画と並んで、プリフェッチ用の描画（ランタイムのプリレンダー）が同じリクエストで実行され（`dist/server/app-render/app-render.js` の `spawnRuntimePrefetchWithFilledCaches`）、キャッシュしていない DB の読み込みがすべて 2 回ずつ走る。DB のログで、どの画面も同じクエリの組が別の接続から同時に 2 回出ることで分かった。`getSession` の最初で `await connection()` すると、その先はプリレンダーから外れ、クエリ数が半分になる（第15章、`src/server/session.ts`）
 42. **PostgreSQL 18.7（`postgres:18.7` イメージ）の `ORDER BY ... COLLATE "ja-x-icu"` は、Node 24 の `localeCompare(..., "ja")` と同じ順に並ぶ。** DB の既定の照合順序（`en_US.utf8`）では、濁点・半濁点の付いたカナの順が変わる（ハナ・バア・パイ → ja ではバア・パイ・ハナ）。顧客一覧の並べ替えを SQL に移すときに確かめた（第15章、`performance.db.test.ts`）
 43. **Prisma 7.10 の `$queryRaw` は `count(*)` を `bigint` で返す。** `Number()` に直してから返す。関連を JOIN で 1 回に読む `relationJoins` はプレビュー機能のままなので使わず、`select` で関連の名前だけを取る（予約 1 回＋関連ごとに 1 回）
+44. **`npm ci --omit=dev` でも Prisma の CLI（`prisma`）と `effect` が入る。** `prisma` は devDependencies だが、`better-auth` の Prisma アダプターと `@prisma/client` の任意の peer 依存でもあり、lockfile で `devOptional` になる。`--omit=peer` でも消えず、`--omit=optional` では消えるが tsx が使う esbuild のネイティブのバイナリ（`@esbuild/linux-arm64`）まで消える。本番の Worker のイメージは `docker/prune-dev-optional.mjs` で lockfile の `devOptional` のもの（108 個）を消す。Web は `output: "standalone"` が追跡したファイルだけなので入らない（第16章）
+45. **`next build` の `output: "standalone"` は `next start` でも警告を出すだけで動く**（`next/dist/server/next.js` の `"next start" does not work with "output: standalone"`）。E2E の出力に警告を混ぜないよう、`NEXT_OUTPUT=standalone` のとき（Dockerfile）だけ有効にする（第16章）
+46. **`npm ci --ignore-scripts` では Prisma のエンジンが取得されず、slim のイメージに OpenSSL を入れると `prisma migrate deploy` が実行時にエンジンを `node_modules/@prisma/engines` に書こうとして失敗する**（非 root では書けない。OpenSSL がないと警告を出して動く）。migrate のイメージは OpenSSL を入れた後、root のまま `npm rebuild prisma @prisma/engines` で取得しておく（第16章）
+47. **Terraform 1.17.2 の `terraform test` の `assert` からは、子モジュールのリソースを参照できない**（出力だけが見える。`module.database is object with 6 attributes`）。モジュールの中のリソースは `run` の `module { source = ... }` でモジュールごとに確かめ、つなぎ方はルートを apply して出力で確かめる。`module` を使う run を足したら `terraform init` をやり直す（`Module not installed`）（第16章）
+48. **`mock_provider "aws"` でも、プロバイダーの値の検証（ARN の形など）は動く。** モックが作るでたらめな文字列を ARN の属性に渡すと `is an invalid ARN: arn: invalid prefix` で失敗するので、`mock_resource` の `defaults` で形の正しい ARN を決める（IAM ロール・ALB・ターゲットグループ・リスナー）（第16章）
+49. **Server Actions は `Origin` とホスト（`x-forwarded-host` か `host`）を比べる**（`next/dist/server/app-render/action-handler.js`）。CloudFront は `x-forwarded-host` を付けないので、オリジンへの Host を ALB の名前に書き換えるとすべての Server Action が失敗する。CloudFront は AllViewer で Host を渡し、ALB の証明書にアプリのドメインを含める（第16章、`docs/architecture.md`）
+50. **AWS の料金ページ（例：Fargate）は単価を JavaScript で表示するので、東京の値を文面から読めない。** 公開の Price List（`https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<コード>/current/ap-northeast-1/index.json`、認証不要）の `terms.OnDemand` と `products` を突き合わせて確かめた。EC2 のファイル（NAT Gateway を含む）は 445MB あるので、保存せずに流しながら該当の行だけを拾った（第16章）

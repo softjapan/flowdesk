@@ -49,5 +49,13 @@ next-env.d.ts
 # prisma（npm install の postinstall で生成する）
 /src/generated/
 
+# terraform（.terraform.lock.hcl はコミットする。state・変数の値は入れない）
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+backend.hcl
+
 # claude code
 .claude/settings.local.json

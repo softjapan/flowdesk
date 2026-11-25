@@ -16,7 +16,7 @@
 | 6 | Worker が payload の `organizationId` を信用している | 誤検知 | SQS のメッセージは `jobId` だけで、payload はサーバーが DB に作ったもの。外から書き換える経路がない | 見送り |
 | 7 | Worker・Webhook がエラーをそのままログに出す | 低 | ログは内部（CloudWatch）だけ。応答は固定の文言 | 見送り（第15章でログの方針を決めるときに扱う） |
 | 8 | CSV の数式対策が電話番号の先頭の `+` にも `'` を付ける | 誤検知 | セキュリティ上は正しい挙動（データの品質の話） | 見送り |
-| 9 | Webhook の本文の大きさに上限がない | 低 | 署名の検証の順序（生の本文で検証）は正しい | ALB の上限で扱う（第16〜17章） |
+| 9 | Webhook の本文の大きさに上限がない | 低 | 署名の検証の順序（生の本文で検証）は正しい | 第16章で確かめたところ、ALB には本文の大きさの上限の設定がない。第17章で WAF のサイズ制約のルールで扱う（`docs/architecture.md` の 9） |
 
 ①は、Service 層の認可（表のすべての行）、`organizationId` での絞り込み、他の組織の ID の 404、`disabledPaths` について「問題なし」とした。②は、Zod による入力の検証、オープンリダイレクト（`safeCallbackUrl`）、Webhook の署名の検証について「問題なし」とした。
 
@@ -28,7 +28,7 @@
 
 | advisory | パッケージ | 経路 | 判断 |
 |----------|-----------|------|------|
-| GHSA-7589-6fvf-x4pw（high、ReDoS） | effect ≤3.22.0 | prisma（dev）→ @prisma/config → effect | CLI だけが使う。`@prisma/client` の peer 依存なので `--omit=dev` でも出るが、ビルドの成果物（`.next/`）には入らない。修正版の Prisma 7 が出たら更新する |
+| GHSA-7589-6fvf-x4pw（high、ReDoS） | effect ≤3.22.0 | prisma（dev）→ @prisma/config → effect | CLI だけが使う。`@prisma/client` の peer 依存なので `--omit=dev` でも出るが、ビルドの成果物（`.next/`）には入らない。本番の web・worker のイメージにも入れない（第16章、`docs/architecture.md` の 6。入っていたらビルドが失敗する）。CLI を持つのは、デプロイのときだけ動く migrate のイメージだけ。修正版の Prisma 7 が出たら更新する |
 | GHSA-g3hv-75wg-m249（moderate、DoS） | minimatch 7〜11.0.0 | shadcn → ts-morph → @ts-morph/common → minimatch | shadcn の CLI だけが使う。アプリが読むのは `shadcn/tailwind.css` だけ |
 
 - `npm audit fix --force` は使わない。prisma@6・shadcn@1 に下げる破壊的な変更になる

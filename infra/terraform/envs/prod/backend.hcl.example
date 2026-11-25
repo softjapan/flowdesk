@@ -1,0 +1,8 @@
+# 第17章：state 用のバケットを作ってから
+#   cp backend.hcl.example backend.hcl
+#   terraform init -backend-config=backend.hcl
+bucket       = "flowdesk-tfstate-111122223333"
+key          = "prod/terraform.tfstate"
+region       = "ap-northeast-1"
+encrypt      = true
+use_lockfile = true

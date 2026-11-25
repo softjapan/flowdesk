@@ -73,6 +73,19 @@ npm run worker              # 別のターミナルで。メール送信・CSV �
 | アプリ | http://localhost:3000 |
 | メール（Mailpit） | http://localhost:8025 |
 
+## 本番（AWS、第16〜17章）
+
+構成・シークレット・月額費用の目安は [`docs/architecture.md`](docs/architecture.md)。第16章では AWS に接続せず、手元で次を確かめる。
+
+```bash
+# 本番のイメージ（web・worker・migrate）を compose の DB・S3・SQS・メールと組み合わせて起動する
+docker compose -f compose.yaml -f compose.prod.yaml up -d --build --wait   # http://localhost:3300
+
+# Terraform（AWS の API は呼ばない。terraform plan・apply はしない）
+cd infra/terraform && terraform fmt -check -recursive
+cd envs/prod && terraform init -backend=false && terraform validate && terraform test
+```
+
 ## Stripe（テストモード）
 
 料金プラン（Free / Pro）の設計は [`docs/billing.md`](docs/billing.md)。**テストモードの API キーだけを使う**（`sk_test_`。本番の `sk_live_` は使わない）。

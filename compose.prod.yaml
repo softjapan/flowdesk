@@ -1,0 +1,67 @@
+# 本番のイメージ（Dockerfile）を、compose.yaml の DB・S3・SQS・メールと
+# 組み合わせて手元で起動する（第16章）。AWS には接続しない。
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d --build --wait
+#   open http://localhost:3300
+# 本番（ECS）との違い：
+# - 秘密情報はここに書いたローカル用の値。本番は Secrets Manager から渡す
+# - S3_ENDPOINT はコンテナの中から届く名前（s3:9000）。ブラウザからの
+#   署名付き URL の PUT・GET は届かない（npm run dev の構成で確かめる）
+# - DB は開発用（flowdesk）と分ける（flowdesk_prodlocal。migrate が作る）
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://flowdesk:flowdesk@db:5432/flowdesk_prodlocal
+  BETTER_AUTH_SECRET: local-only-compose-prod-not-a-real-secret
+  BETTER_AUTH_URL: http://localhost:3300
+  S3_ENDPOINT: http://s3:9000
+  S3_BUCKET: flowdesk-uploads
+  SQS_ENDPOINT: http://sqs:9324
+  SQS_QUEUE_URL: http://sqs:9324/000000000000/flowdesk-jobs
+  AWS_REGION: ap-northeast-1
+  AWS_ACCESS_KEY_ID: flowdesk
+  AWS_SECRET_ACCESS_KEY: flowdesk-secret
+  SMTP_HOST: mail
+  SMTP_PORT: "1025"
+  MAIL_FROM: FlowDesk <no-reply@flowdesk.local>
+
+# ECS と同じく、ルートを読み取り専用にし、書き込む場所だけを用意する
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  migrate:
+    build: { context: ., target: migrate }
+    image: flowdesk-migrate:local
+    environment:
+      DATABASE_URL: postgresql://flowdesk:flowdesk@db:5432/flowdesk_prodlocal
+    depends_on:
+      db: { condition: service_healthy }
+    restart: "no"
+
+  web:
+    build: { context: ., target: web }
+    image: flowdesk-web:local
+    <<: *hardening
+    tmpfs:
+      - /tmp
+      - /app/.next/cache:uid=1000,gid=1000
+    environment: *app-env
+    ports:
+      - "3300:3000"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      s3: { condition: service_started }
+      sqs: { condition: service_started }
+
+  worker:
+    build: { context: ., target: worker }
+    image: flowdesk-worker:local
+    <<: *hardening
+    tmpfs:
+      - /tmp:uid=1000,gid=1000
+    environment: *app-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      sqs: { condition: service_started }
+      mail: { condition: service_started }

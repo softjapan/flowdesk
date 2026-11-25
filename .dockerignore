@@ -1,0 +1,27 @@
+# 秘密情報をイメージに入れない（.env.example も要らない）
+.env*
+*.pem
+
+# ホストで作ったもの（イメージの中で作り直す）
+node_modules
+.next
+src/generated
+*.tsbuildinfo
+next-env.d.ts
+
+# 実行に要らないもの
+.git
+.githooks
+.claude
+.mcp.json
+docs
+infra
+e2e
+test-results
+playwright-report
+blob-report
+coverage
+**/*.test.ts
+**/*.db.test.ts
+Dockerfile
+compose*.yaml
