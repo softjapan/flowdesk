@@ -5,7 +5,7 @@
  * 動く。データを壊し合わないよう、予約は「テストごと・試行ごとに別の日」、
  * 作るメニューは「別の名前」にする（再試行で前の試行の予約と重ならない）。
  */
-import type { Page, TestInfo } from "@playwright/test";
+import { expect, type Page, type TestInfo } from "@playwright/test";
 import { addDays, toZonedYmd } from "../src/lib/datetime";
 import {
   DEMO_USER_EMAIL,
@@ -49,4 +49,26 @@ export function freeDate(testInfo: TestInfo, slot: number): string {
 /** 試行ごとに変わる短い名前の接尾辞 */
 export function uniqueSuffix(testInfo: TestInfo): string {
   return `${testInfo.testId.slice(0, 6)}-${testInfo.retry}-${Date.now().toString(36)}`;
+}
+
+/**
+ * デモサロンに顧客を画面から登録し、ID を返す。シードの顧客を変えずに
+ * 済むよう、削除や表示を試すテストはこれで作った顧客を使う
+ */
+export async function createCustomer(
+  page: Page,
+  name: string,
+  extra: { note?: string } = {},
+): Promise<string> {
+  await page.goto(`/${ORG}/customers/new`);
+  const form = page.getByRole("form", { name: "顧客の新規登録" });
+  await form.getByLabel("氏名").fill(name);
+  await form.getByLabel("フリガナ").fill("テスト タロウ");
+  await form.getByLabel("メール").fill("e2e-customer@example.com");
+  if (extra.note) await form.getByLabel("メモ").fill(extra.note);
+  await form.getByRole("button", { name: "登録する" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/${ORG}/customers/(?!new)[\\w-]+$`),
+  );
+  return page.url().split("/").at(-1)!;
 }

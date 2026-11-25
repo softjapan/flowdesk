@@ -1,0 +1,21 @@
+{
+  "$comment": "npm audit で既知・判断済みの advisory（docs/security.md）。reviewBy を過ぎたら見直す。scripts/audit-check.ts が読む",
+  "advisories": [
+    {
+      "id": "GHSA-7589-6fvf-x4pw",
+      "package": "effect",
+      "severity": "high",
+      "path": "prisma（dev）→ @prisma/config → effect",
+      "reason": "Prisma CLI だけが使う。Schema.TemplateLiteral の ReDoS で、外部の入力は届かない。本番の実行時（next start・Worker）には入らない。npm audit fix --force は prisma@6 に下げるので使わない",
+      "reviewBy": "2027-01-31"
+    },
+    {
+      "id": "GHSA-g3hv-75wg-m249",
+      "package": "minimatch",
+      "severity": "moderate",
+      "path": "shadcn → ts-morph → @ts-morph/common → minimatch",
+      "reason": "shadcn の CLI（部品の追加）だけが使う。アプリが読むのは shadcn/tailwind.css だけで、ts-morph は実行時に入らない。npm audit fix --force は shadcn@1 に下げるので使わない",
+      "reviewBy": "2027-01-31"
+    }
+  ]
+}

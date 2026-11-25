@@ -18,7 +18,7 @@
 | 入力の検証（必須・範囲・整数・タイムゾーン） | ○ | | △ | `validation/*.test.ts`。E2E はエラーの表示だけを見る |
 | 認可の表（ロールごとの可否） | ○ | | | `services.test.ts` の「認可マトリクスの表」。表の 1 行＝1 テスト |
 | 担当・相手のロールで決まる認可（△） | ○ | ○ | | Staff は自分の予約のみ、Admin は Staff⇔Admin のみ |
-| 他の組織の ID を指定すると not_found | | ○ | 第14章 | 更新・削除・取得のすべてで確かめ、相手の行が変わっていないことも見る |
+| 他の組織の ID を指定すると not_found | | ○ | ○ | DB は更新・削除・取得のすべてで確かめ、相手の行が変わっていないことも見る。E2E（`e2e/tenant-isolation.spec.ts`）は URL・Server Action の引数・Route Handler の 3 つの入口（第14章） |
 | DB の状態で決まる条件 | | ○ | | 最後の Owner、プランの上限、予約で使われている店舗・メニュー |
 | 監査ログが変更と同じトランザクションで残る | | ○ | | 操作者・対象・変わった項目名 |
 | 同時実行（排他制約・行ロック・楽観ロック） | | ○ | | 5 件同時の予約で成功は 1 件、同時の受諾で上限を超えない |
@@ -26,6 +26,7 @@
 | 画面の状態（エラーの後もフォームの値が残る） | | | ○ | 第9章の回帰 |
 | ブラウザから S3 への直接 PUT と完了の確認 | | △ | ○ | DB のテストは S3 を差し替え、E2E は RustFS に本当に送る（第11章の回帰） |
 | ログインとリダイレクト | | △ | ○ | Cookie・proxy・callbackUrl は E2E でしか確かめられない |
+| セキュリティヘッダー・CSRF・XSS | ○ | | ○ | CSP の組み立ては単体（`security-headers.test.ts`）、ブラウザが止めることは E2E（`e2e/security.spec.ts`、`docs/security.md`） |
 
 E2E は遅く、壊れやすい。**Service で判定できることは DB のテストで確かめ、E2E には「画面とサーバーのつなぎ目」だけを残す**。たとえば Staff が店舗を作れないことは DB のテスト（`forbidden`）で確かめ、E2E では「Staff にはフォームが出ない」ことだけを見る。
 
@@ -59,6 +60,7 @@ Service を足すとき・変えるときは、次を順に確かめる（第13�
 - `BETTER_AUTH_SECRET` は E2E 専用の値を渡す（`next start` は本番モードなので、既定の鍵では Better Auth が動かない）
 - ログインは `e2e/auth.setup.ts`（`setup` プロジェクト）で Owner と Staff の 2 回だけ行い、Cookie を `e2e/.auth/` に保存する。ほかのテストは保存した状態から始める。Better Auth は本番モードで `/sign-in` を **10 秒に 3 回まで**に制限するので、ログインのテストを増やすときは気をつける
 - テストは並列に動き、DB は実行ごとに 1 回だけ入れ直す。**データを壊し合わないよう**、予約は `freeDate(testInfo, slot)` でテストごと・再試行ごとに別の日に、作るメニューは `uniqueSuffix(testInfo)` で別の名前にする。シードの行（渋谷店・カットなど）を変えるテストは書かない
+- Server Action を画面を通さずに呼ぶときは `e2e/server-actions.ts` を使う。Action の ID は `next build` が出力する `.next/server/server-reference-manifest.json` から引き、文字列だけの引数を JSON の配列で送る。`notFound()` は HTTP 404 になる。成功の対照（同じ組み立て方で自分の組織の顧客を削除できる）と組にして、テストの組み立て方の誤りで 404 になっていないことを示す
 - 要素はロールとラベルで探す。ラベルは部分一致するので、サイドバー（「メインメニュー」）と重なるものは `{ exact: true }` にする。Next.js のルートの読み上げ（`__next-route-announcer__`）も `role="alert"` なので、エラーはフォームの中に絞って探す
 
 ### 回帰テスト
@@ -66,6 +68,7 @@ Service を足すとき・変えるときは、次を順に確かめる（第13�
 | 章 | 不具合 | テスト | 確かめたこと |
 |----|--------|--------|--------------|
 | 9 | 予約のエラーの後、select が最初の選択に戻る | `e2e/reservations.spec.ts`「重なる予約はエラーになり、選んだ内容がフォームに残る」 | 修正（select の `key`）を外すと「顧客」が `""` になって失敗する |
+| 14 | 招待した Admin を削除・降格しても、その人が出した招待で加入できる | `members.db.test.ts`「招待した人が降格・削除されたら、その人の招待では加入できない」 | 受諾時の確認を外すと、状態が `pending` のままで失敗する |
 | 11 | 名前だけ .png の SVG が登録できる | `e2e/attachments.spec.ts`「名前だけ .png の SVG は拒否する」 | 先頭のバイトの確認を外すと、エラーが出ずに失敗する |
 
 不具合を直したら、直す前に失敗する回帰テストを足し、この表に書く。
@@ -85,10 +88,11 @@ Service を足すとき・変えるときは、次を順に確かめる（第13�
 
 | ジョブ | いつ | 内容 | 必要なもの |
 |--------|------|------|-----------|
-| check | すべての push と PR | `npm ci` → `npm run check`（型・Lint・整形・単体） | なし |
+| check | すべての push と PR | `npm ci` → `npm run check`（型・Lint・整形・単体・秘密情報の検出） | なし |
 | build | すべての push と PR | `npm run build`（**`DATABASE_URL` を設定しない**。第8章の回帰） | なし |
 | test-db | すべての push と PR | `npm run test:db` | PostgreSQL 18.7（サービスコンテナ。`TEST_DATABASE_URL` を渡す） |
 | e2e | PR と main | `npx playwright install --with-deps chromium` → `npm run test:e2e` | PostgreSQL・RustFS（`S3_ENDPOINT` と鍵）。失敗したら `playwright-report/` と `test-results/`（trace）を成果物に残す |
+| security | 週 1 回と、依存を更新する PR | `npm run audit:check`・`npm run secrets:scan -- --history`（`docs/security.md`） | レジストリへの接続。clone は全履歴（`fetch-depth: 0`） |
 
 - CI（`CI=1`）では E2E の再試行を 2 回にし、`test.only` を禁止する。ローカルは再試行しない（不安定なテストを隠さない）
 - 再試行で通ったテスト（flaky）は放置せず、原因を直す。データの衝突なら `freeDate`・`uniqueSuffix` を使っているか確かめる

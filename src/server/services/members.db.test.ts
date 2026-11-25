@@ -40,6 +40,8 @@ const users = {
   staff: "rbac_staff",
   staff2: "rbac_staff2",
   invitee: "rbac_invitee",
+  invitee2: "rbac_invitee2",
+  inviter: "rbac_inviter",
   stranger: "rbac_stranger",
 } as const;
 const emailOf = (userId: string) =>
@@ -531,6 +533,84 @@ describe("招待（F-03）", () => {
         TEST_NOW,
       ),
     ).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  // 第14章のセキュリティレビューで見つかった：招待した Admin を削除・
+  // 降格しても、その人が出した Admin の招待で 48 時間は加入できた
+  it("招待した人が降格・削除されたら、その人の招待では加入できない", async () => {
+    const email = emailOf(users.invitee2);
+    const demoted = await inviteMember(
+      await ctxOf(users.admin2),
+      { email, role: "admin" },
+      TEST_NOW,
+      send,
+    );
+    if (!demoted.ok) throw new Error(demoted.reason);
+    await setRole(memberId("admin2"), "staff");
+    try {
+      expect(
+        (
+          await getInvitationForUser(
+            users.invitee2,
+            demoted.value.id,
+            TEST_NOW,
+          )
+        )?.state,
+      ).toBe("closed");
+      expect(
+        await acceptInvitation(
+          users.invitee2,
+          demoted.value.id,
+          TEST_NOW,
+        ),
+      ).toEqual({ ok: false, reason: "not_found" });
+      expect(await getOrgContext(SLUG, users.invitee2)).toBeNull();
+    } finally {
+      await setRole(memberId("admin2"), "admin");
+    }
+    // ロールが戻れば（今も招待できるなら）受諾できる状態に戻る
+    expect(
+      (
+        await getInvitationForUser(
+          users.invitee2,
+          demoted.value.id,
+          TEST_NOW,
+        )
+      )?.state,
+    ).toBe("pending");
+
+    // 招待した人を削除した場合（招待し直すと前の招待は閉じる）
+    const inviter = await createMember(
+      { organizationId, userId: users.inviter, role: "admin" },
+      TEST_NOW,
+    );
+    const removed = await inviteMember(
+      await ctxOf(users.inviter),
+      { email, role: "admin" },
+      TEST_NOW,
+      send,
+    );
+    if (!removed.ok) throw new Error(removed.reason);
+    expect(
+      (await removeMember(await ctxOf(users.owner), inviter.id)).ok,
+    ).toBe(true);
+    expect(
+      (
+        await getInvitationForUser(
+          users.invitee2,
+          removed.value.id,
+          TEST_NOW,
+        )
+      )?.state,
+    ).toBe("closed");
+    expect(
+      await acceptInvitation(
+        users.invitee2,
+        removed.value.id,
+        TEST_NOW,
+      ),
+    ).toEqual({ ok: false, reason: "not_found" });
+    expect(await getOrgContext(SLUG, users.invitee2)).toBeNull();
   });
 
   it("キューに送れなくても、招待とメールの依頼は残る（Worker が送り直す）", async () => {

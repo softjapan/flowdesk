@@ -1,6 +1,6 @@
 # 技術スタックと固定バージョン
 
-確認日：2026-11-23。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
+確認日：2026-11-23（第14章の追記は 2026-11-25）。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
 `package.json` では本番依存を完全一致（`-E`）で固定し、更新は章タグを切り直すときにまとめて行う。
 
 ## 実行環境
@@ -82,3 +82,8 @@
 32. **Next.js 16 はルートの読み上げ用に `role="alert"` の要素（`__next-route-announcer__`）を置く。** `page.getByRole("alert")` は 2 つに一致して strict mode で失敗するので、フォームの中に絞る（第13章）
 33. **PostgreSQL の `CREATE DATABASE ... TEMPLATE` は、テンプレートに接続があると失敗する。** DB を使うテストはファイルごとにテンプレート（`flowdesk_test`）を複製して並列に実行するので、テンプレートにシードを入れた接続は閉じてから複製し、テストのワーカーはテンプレートに接続しない。複製は `DROP DATABASE ... WITH (FORCE)`（PostgreSQL 13 以降）で消す（第13章）
 34. **Prisma 7 のドライバアダプター経由の外部キー違反は、`meta.driverAdapterError.cause.originalCode` に `23503` が入る（排他制約の 23P01 と同じ場所）。** 予約が参照する店舗・メニューの削除は、件数を数えずに DB の外部キー（`NoAction`）に任せ、この値で `in_use` にする。違反はトランザクションを中断させるので、`runInTransaction` の外で受ける（第13章）
+35. **第14章では依存を追加していない。** 秘密情報の検出（`scripts/scan-secrets.ts`）と `npm audit` の判定（`scripts/audit-check.ts`）は tsx で動く自前のスクリプトにした（gitleaks などの外部のバイナリを CI に入れない）。`npm audit` の結果と方針は `docs/security.md`（第14章）
+36. **Next.js 16.4.6 で、Server Action の中の `notFound()` は HTTP 404 になる。** Action の ID は `.next/server/server-reference-manifest.json` に `filename`・`exportedName` と並んで出るので、E2E から画面を通さずに呼べる。`Origin` がホストと違うと `Invalid Server Actions request` で実行しない（第14章）
+37. **Cache Components（PPR）と nonce の CSP は両立しない**（同梱のドキュメント `01-app/02-guides/content-security-policy.md`）。`script-src` に `'unsafe-inline'` を残し、CSP は外部の読み込み・送信先・埋め込みの制限に使う。S3 のオリジンが実行時の環境変数で決まるので、CSP は `next.config.ts` の `headers()`（ビルド時に固まる）ではなく proxy で付ける（第14章）
+38. **Better Auth 1.7.27 は `baseURL` を渡さないと、HTTP のリクエストの URL（Host ヘッダー）から公開 URL を作る**（`dist/auth/base.mjs`）。パスワード再設定のメールのリンクが Host ヘッダーで変わるので、`src/server/app-url.ts` で必ず渡し、本番で未設定なら例外にする（第14章）
+39. **Playwright の `route.fulfill` で HTML を返すときは `charset=utf-8` を付ける。** 付けないと日本語の属性が文字化けし、`iframe[title="埋め込み"]` に一致しない。また、公開のホスト名（`evil.example`）のページから `localhost` を iframe に入れると、Chrome の Local Network Access で CSP より前に止まる。他のオリジンは `127.0.0.1` で作る（第14章）

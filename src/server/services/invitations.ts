@@ -4,7 +4,7 @@
  * アドレスと本人のメールアドレスが一致するときだけ扱う。他人宛ての
  * 招待は、存在しない招待と同じく null・not_found にする（組織名を漏らさない）。
  */
-import { runInTransaction } from "@/server/db";
+import { type Db, runInTransaction } from "@/server/db";
 import type { Role } from "@/server/domain";
 import { createAuditLog } from "@/server/repositories/audit-logs";
 import {
@@ -18,6 +18,7 @@ import {
   lockOrganization,
 } from "@/server/repositories/organizations";
 import { findUserById } from "@/server/repositories/users";
+import { canInvite } from "@/server/services/authz";
 import { canAddStaff } from "@/server/services/plan-limits";
 import { fail, ok, type Result } from "@/server/services/result";
 
@@ -51,6 +52,27 @@ async function findForUser(userId: string, id: string) {
   return findInvitationForEmail(id, user.email.toLowerCase());
 }
 
+/**
+ * 招待した人が、今もそのロールで招待できるか。招待の後に招待した人が
+ * 削除・降格されたら、その人の招待では加入させない（第14章のレビューで
+ * 見つかった。削除した Admin が出した Admin の招待が 48 時間使えた）
+ */
+async function inviterCanStillInvite(
+  invitation: {
+    organizationId: string;
+    inviterId: string;
+    role: Role;
+  },
+  db?: Db,
+): Promise<boolean> {
+  const inviter = await findMember(
+    invitation.organizationId,
+    invitation.inviterId,
+    db,
+  );
+  return inviter !== null && canInvite(inviter.role, invitation.role);
+}
+
 export async function getInvitationForUser(
   userId: string,
   id: string,
@@ -58,6 +80,7 @@ export async function getInvitationForUser(
 ): Promise<InvitationView | null> {
   const invitation = await findForUser(userId, id);
   if (!invitation) return null;
+  const state = stateOf(invitation.status, invitation.expiresAt, now);
   return {
     id: invitation.id,
     organizationName: invitation.organization.name,
@@ -65,7 +88,11 @@ export async function getInvitationForUser(
     role: invitation.role,
     inviterName: invitation.user.name,
     expiresAt: invitation.expiresAt,
-    state: stateOf(invitation.status, invitation.expiresAt, now),
+    state:
+      state === "pending" &&
+      !(await inviterCanStillInvite(invitation))
+        ? "closed"
+        : state,
   };
 }
 
@@ -92,6 +119,10 @@ export async function acceptInvitation(
   const { organizationId } = invitation;
   return runInTransaction(async (tx) => {
     if (!(await lockOrganization(organizationId, tx))) {
+      return fail("not_found");
+    }
+    // ロール変更・削除も組織をロックするので、ロックの後に確かめる
+    if (!(await inviterCanStillInvite(invitation, tx))) {
       return fail("not_found");
     }
     const alreadyMember = await findMember(

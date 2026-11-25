@@ -13,6 +13,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { organization } from "better-auth/plugins/organization";
 import { ac, roles } from "@/server/access-control";
+import { appBaseUrl } from "@/server/app-url";
 import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
@@ -53,9 +54,10 @@ const DISABLED_ORGANIZATION_PATHS = [
  */
 export function createAuth() {
   return betterAuth({
-    // 署名・暗号化の鍵と、メールのリンクなどに使う公開 URL（.env.example）
+    // 署名・暗号化の鍵と、メールのリンクなどに使う公開 URL（.env.example）。
+    // 公開 URL を渡さないと Host ヘッダーから推定されるので、必ず渡す
     secret: process.env.BETTER_AUTH_SECRET,
-    baseURL: process.env.BETTER_AUTH_URL,
+    baseURL: appBaseUrl(),
     database: prismaAdapter(getPrisma(), { provider: "postgresql" }),
     disabledPaths: DISABLED_ORGANIZATION_PATHS,
     emailAndPassword: {

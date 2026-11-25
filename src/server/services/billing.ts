@@ -7,6 +7,7 @@
  * Checkout から戻ってきた URL（?checkout=success）は信用しない。
  */
 import type Stripe from "stripe";
+import { appUrl } from "@/server/app-url";
 import { type Db, runInTransaction } from "@/server/db";
 import {
   isStaleEvent,
@@ -82,11 +83,6 @@ export async function getBillingPage(
       configured && Boolean(subscription?.stripeCustomerId),
     configured,
   });
-}
-
-function appUrl(path: string): string {
-  const base = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
-  return new URL(path, base).toString();
 }
 
 /**

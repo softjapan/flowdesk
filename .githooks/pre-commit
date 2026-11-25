@@ -3,22 +3,9 @@
 # core.hooksPath を .githooks に向けるので、clone した全員に効く。
 set -e
 
-# 1. 秘密情報らしきものがステージされていないか
-staged=$(git diff --cached --name-only --diff-filter=ACM)
-if grep -Eq '(^|/)\.env($|\.local$|\..+\.local$|\.production$)' \
-  <<<"$staged"; then
-  echo "pre-commit: .env ファイルはコミットしない" >&2
-  exit 1
-fi
-# 検出パターンを書いたこのファイル自身は対象から外す
-added=$(git diff --cached -U0 -- . ':(exclude).githooks')
-# 接頭辞だけの言及（「sk_live_ は使わない」など）は止めず、
-# 接頭辞の後に英数字が続く、本物のキーの形だけを止める
-if grep -Eq '^\+.*((sk|rk)_live_[0-9A-Za-z]{10,}|AKIA[0-9A-Z]{16})' \
-  <<<"$added"; then
-  echo "pre-commit: 本番の API キーらしき文字列が含まれている" >&2
-  exit 1
-fi
+# 1. 秘密情報らしきものがステージされていないか（.env などのファイル名と、
+#    追加した行の本物の鍵の形。ルールは scripts/secret-rules.ts、第14章）
+npx --no-install tsx scripts/scan-secrets.ts --staged
 
 # 2. 型チェック・Lint・整形・テスト
 npm run --silent check

@@ -113,6 +113,7 @@ export async function findInvitationForEmail(
       role: true,
       status: true,
       expiresAt: true,
+      inviterId: true,
       organization: { select: { name: true, slug: true } },
       user: { select: { name: true } },
     },

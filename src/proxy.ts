@@ -5,6 +5,9 @@
  * ここでは Cookie があるかだけを見て、DB には問い合わせない。
  * Cookie は偽造も期限切れもありうるので、本当の確認はサーバー側
  * （src/server/session.ts の getCurrentUserId）で毎回行う。
+ *
+ * あわせて Content-Security-Policy を付ける（S3 のオリジンを実行時の
+ * 環境変数から決めるため。src/lib/security-headers.ts）。
  */
 import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
@@ -13,14 +16,23 @@ import {
   loginUrlFor,
   requiresLogin,
 } from "@/lib/auth-paths";
+import { cspFromEnv } from "@/lib/security-headers";
+
+function withCsp(response: NextResponse): NextResponse {
+  response.headers.set(
+    "Content-Security-Policy",
+    cspFromEnv(process.env, process.env.NODE_ENV === "development"),
+  );
+  return response;
+}
 
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const path = `${pathname}${search}`;
 
   if (requiresLogin(pathname) && !getSessionCookie(request)) {
-    return NextResponse.redirect(
-      new URL(loginUrlFor(path), request.url),
+    return withCsp(
+      NextResponse.redirect(new URL(loginUrlFor(path), request.url)),
     );
   }
 
@@ -28,7 +40,7 @@ export function proxy(request: NextRequest) {
   // クライアントが同じ名前のヘッダーを送ってきても上書きする
   const headers = new Headers(request.headers);
   headers.set(REQUEST_PATH_HEADER, path);
-  return NextResponse.next({ request: { headers } });
+  return withCsp(NextResponse.next({ request: { headers } }));
 }
 
 export const config = {

@@ -9,6 +9,7 @@
  * 5. Free プランでスタッフが上限なら招待できない → plan-limits.canAddStaff
  *    （受諾の時点でも確かめる。invitations.ts）
  */
+import { appUrl } from "@/server/app-url";
 import { buildInvitationMail } from "@/server/auth-mails";
 import { runInTransaction } from "@/server/db";
 import { ROLE_LABELS, type Role } from "@/server/domain";
@@ -246,8 +247,7 @@ export async function removeMember(
 }
 
 function invitationUrl(id: string): string {
-  const base = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
-  return new URL(`/invitations/${id}`, base).toString();
+  return appUrl(`/invitations/${id}`);
 }
 
 /**

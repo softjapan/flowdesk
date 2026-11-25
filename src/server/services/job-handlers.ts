@@ -17,6 +17,7 @@
 import { z } from "zod";
 import { toRole } from "@/server/access-control";
 import { addDays, toZonedYmd, zonedToUtc } from "@/lib/datetime";
+import { appUrl } from "@/server/app-url";
 import { toCsv } from "@/server/csv";
 import {
   buildCustomerExportReadyMail,
@@ -71,11 +72,6 @@ function parsePayload<T>(schema: z.ZodType<T>, job: JobRecord): T {
     );
   }
   return parsed.data;
-}
-
-function appUrl(path: string): string {
-  const base = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
-  return new URL(path, base).toString();
 }
 
 // ---------------------------------------------------------------
