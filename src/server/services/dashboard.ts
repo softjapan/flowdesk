@@ -7,13 +7,13 @@ import {
 } from "@/lib/datetime";
 import type { ReservationStatus } from "@/server/domain";
 import {
-  listServices,
-  listStaffProfiles,
-} from "@/server/repositories/catalog";
-import { listCustomers } from "@/server/repositories/customers";
-import { listReservations } from "@/server/repositories/reservations";
+  countReservationsByDay,
+  listReservationsWithNames,
+  summarizeReservations,
+} from "@/server/repositories/reservations";
 import { canViewRevenue } from "@/server/services/authz";
 import type { OrgContext } from "@/server/services/org-context";
+import { toReservationListItem } from "@/server/services/reservations";
 
 export const TREND_DAYS = 14;
 
@@ -53,66 +53,40 @@ export async function getDashboard(
   const monthTo = zonedToUtc(startOfNextMonth(todayYmd), tz);
   const trendFromYmd = addDays(todayYmd, -(TREND_DAYS - 1));
   const trendFrom = zonedToUtc(trendFromYmd, tz);
+  const todayFrom = zonedToUtc(todayYmd, tz);
   const tomorrow = zonedToUtc(addDays(todayYmd, 1), tz);
 
-  const [monthly, recent, customers, services, staff] =
-    await Promise.all([
-      listReservations(ctx.organizationId, {
-        from: monthFrom,
-        to: monthTo,
-      }),
-      listReservations(ctx.organizationId, {
-        from: trendFrom,
-        to: tomorrow,
-      }),
-      listCustomers(ctx.organizationId),
-      listServices(ctx.organizationId),
-      listStaffProfiles(ctx.organizationId),
-    ]);
+  // 件数・売上・日別の件数は DB で集計し、行を読むのは本日の予約だけにする
+  const [month, counts, today] = await Promise.all([
+    summarizeReservations(ctx.organizationId, {
+      from: monthFrom,
+      to: monthTo,
+    }),
+    countReservationsByDay(
+      ctx.organizationId,
+      { from: trendFrom, to: tomorrow },
+      tz,
+    ),
+    listReservationsWithNames(ctx.organizationId, {
+      from: todayFrom,
+      to: tomorrow,
+    }),
+  ]);
 
-  const active = monthly.filter((r) => r.status !== "cancelled");
-  const revenueYen = canViewRevenue(ctx.role)
-    ? active.reduce((sum, r) => sum + r.priceYen, 0)
-    : null;
-
-  const counts = new Map<string, number>();
-  for (const r of recent) {
-    if (r.status === "cancelled") continue;
-    const ymd = toZonedYmd(r.startsAt, tz);
-    counts.set(ymd, (counts.get(ymd) ?? 0) + 1);
-  }
   const trend = Array.from({ length: TREND_DAYS }, (_, i) => {
     const date = addDays(trendFromYmd, i);
     return { date, count: counts.get(date) ?? 0 };
   });
 
-  const customerById = new Map(customers.map((c) => [c.id, c]));
-  const serviceById = new Map(services.map((s) => [s.id, s]));
-  const staffById = new Map(staff.map((s) => [s.id, s]));
-  const todayFrom = zonedToUtc(todayYmd, tz);
-  const today = recent
-    .filter((r) => r.startsAt.getTime() >= todayFrom.getTime())
-    .map((r) => ({
-      id: r.id,
-      startsAt: r.startsAt,
-      endsAt: r.endsAt,
-      customerName:
-        customerById.get(r.customerId)?.name ?? "（不明）",
-      serviceName: serviceById.get(r.serviceId)?.name ?? "（不明）",
-      staffName:
-        staffById.get(r.staffProfileId)?.displayName ?? "（不明）",
-      status: r.status,
-    }));
-
   return {
     todayYmd,
     timezone: tz,
     month: {
-      reservationCount: active.length,
-      customerCount: new Set(active.map((r) => r.customerId)).size,
-      revenueYen,
+      reservationCount: month.reservationCount,
+      customerCount: month.customerCount,
+      revenueYen: canViewRevenue(ctx.role) ? month.revenueYen : null,
     },
     trend,
-    today,
+    today: today.map(toReservationListItem),
   };
 }

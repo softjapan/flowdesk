@@ -34,9 +34,12 @@ export default async function CustomersPage({
   const { org } = await params;
   const ctx = await getOrgContext(org, await getCurrentUserId());
   if (!ctx) notFound();
-  const list = await listCustomers(ctx, await searchParams);
+  // 互いに依存しないので並べて待つ。
   // CSV エクスポートは Owner・Admin のみ（Staff には null が返る）
-  const exports = await listCustomerExports(ctx);
+  const [list, exports] = await Promise.all([
+    listCustomers(ctx, await searchParams),
+    listCustomerExports(ctx),
+  ]);
   const { q, page } = list.query;
 
   const pageHref = (p: number) => {

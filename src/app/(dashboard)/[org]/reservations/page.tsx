@@ -6,8 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
   Table,
-  TableBody,
-  TableCell,
   TableHead,
   TableHeader,
   TableRow,
@@ -19,6 +17,7 @@ import {
   type CalendarQuery,
 } from "@/server/services/reservations";
 import { getCurrentUserId } from "@/server/session";
+import { CompactTableBody } from "../_components/compact-table";
 import { StatusBadge } from "../_components/status-badge";
 
 function calendarHref(
@@ -152,9 +151,9 @@ export default async function ReservationsPage({
                     <TableHead>状態</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <CompactTableBody>
                   {day.reservations.map((r) => (
-                    <TableRow
+                    <tr
                       key={r.id}
                       className={
                         r.status === "cancelled"
@@ -162,7 +161,7 @@ export default async function ReservationsPage({
                           : undefined
                       }
                     >
-                      <TableCell className="tabular-nums">
+                      <td className="tabular-nums">
                         <Link
                           href={`/${ctx.slug}/reservations/${r.id}`}
                           className="underline-offset-4 hover:underline"
@@ -170,16 +169,16 @@ export default async function ReservationsPage({
                           {formatTime(r.startsAt, timezone)}〜
                           {formatTime(r.endsAt, timezone)}
                         </Link>
-                      </TableCell>
-                      <TableCell>{r.customerName}</TableCell>
-                      <TableCell>{r.serviceName}</TableCell>
-                      <TableCell>{r.staffName}</TableCell>
-                      <TableCell>
+                      </td>
+                      <td>{r.customerName}</td>
+                      <td>{r.serviceName}</td>
+                      <td>{r.staffName}</td>
+                      <td>
                         <StatusBadge status={r.status} />
-                      </TableCell>
-                    </TableRow>
+                      </td>
+                    </tr>
                   ))}
-                </TableBody>
+                </CompactTableBody>
               </Table>
             )}
           </section>

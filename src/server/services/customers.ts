@@ -3,7 +3,7 @@ import { createAuditLog } from "@/server/repositories/audit-logs";
 import {
   createCustomer as createCustomerRow,
   findCustomer,
-  listCustomers as listCustomerRows,
+  searchCustomers,
   softDeleteCustomer,
   updateCustomer as updateCustomerRow,
   type CustomerFields,
@@ -45,55 +45,38 @@ export type CustomerList = {
   pageCount: number;
 };
 
-function digitsOnly(value: string): string {
-  return value.replace(/\D/g, "");
-}
-
-/** 氏名・フリガナ・メール・電話番号（ハイフンの有無を問わない）で検索 */
-function matches(c: CustomerListItem, q: string): boolean {
-  const needle = q.toLowerCase();
-  const fields = [c.name, c.nameKana, c.email].map((v) =>
-    v.toLowerCase().replace(/\s/g, ""),
-  );
-  if (fields.some((v) => v.includes(needle.replace(/\s/g, "")))) {
-    return true;
-  }
-  const digits = digitsOnly(q);
-  return digits.length > 0 && digitsOnly(c.phone).includes(digits);
-}
-
+/**
+ * 氏名・フリガナ・メール・電話番号（ハイフンの有無を問わない）で検索し、
+ * フリガナの順に 1 ページ分を返す。絞り込み・並べ替え・ページングは SQL で
+ * 行う（searchCustomers）
+ */
 export async function listCustomers(
   ctx: OrgContext,
   params: SearchParams,
 ): Promise<CustomerList> {
   const parsed = parseCustomerListQuery(params);
-  const all = await listCustomerRows(ctx.organizationId);
-  const filtered = all
-    .map(({ id, name, nameKana, email, phone }) => ({
-      id,
-      name,
-      nameKana,
-      email,
-      phone,
-    }))
-    .filter((c) => parsed.q === "" || matches(c, parsed.q))
-    .sort(
-      (a, b) =>
-        a.nameKana.localeCompare(b.nameKana, "ja") ||
-        a.id.localeCompare(b.id),
-    );
+  const search = (page: number) =>
+    searchCustomers(ctx.organizationId, {
+      text: parsed.q.toLowerCase().replace(/\s/g, ""),
+      digits: parsed.q.replace(/[^0-9]/g, ""),
+      skip: (page - 1) * CUSTOMER_PAGE_SIZE,
+      take: CUSTOMER_PAGE_SIZE,
+    });
 
-  const pageCount = Math.max(
-    1,
-    Math.ceil(filtered.length / CUSTOMER_PAGE_SIZE),
-  );
-  const page = Math.min(parsed.page, pageCount);
-  const start = (page - 1) * CUSTOMER_PAGE_SIZE;
+  let page = parsed.page;
+  let { rows, total } = await search(page);
+  // 範囲外のページは件数も返らないので、1 ページ目で件数を数えて最後の
+  // ページを読み直す
+  if (rows.length === 0 && page > 1) {
+    ({ total } = await search(1));
+    page = Math.max(1, Math.ceil(total / CUSTOMER_PAGE_SIZE));
+    ({ rows } = await search(page));
+  }
   return {
     query: { q: parsed.q, page },
-    items: filtered.slice(start, start + CUSTOMER_PAGE_SIZE),
-    total: filtered.length,
-    pageCount,
+    items: rows,
+    total,
+    pageCount: Math.max(1, Math.ceil(total / CUSTOMER_PAGE_SIZE)),
   };
 }
 

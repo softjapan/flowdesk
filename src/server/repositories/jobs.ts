@@ -29,6 +29,32 @@ export async function insertJob(
   return row.id;
 }
 
+/**
+ * まとめて作る（第15章）。insertJob を件数分呼ぶと 1 件 2 クエリになり、
+ * 前日リマインドで予約の数だけクエリが増えていた（N+1）。返す id は jobs と
+ * 同じ順。既にあるジョブ（同じ idempotencyKey）は作らずにその id を返す
+ */
+export async function insertJobs(
+  jobs: NewJob[],
+  db: Db = getPrisma(),
+): Promise<string[]> {
+  if (jobs.length === 0) return [];
+  await db.job.createMany({ data: jobs, skipDuplicates: true });
+  const rows = await db.job.findMany({
+    where: {
+      idempotencyKey: { in: jobs.map((j) => j.idempotencyKey) },
+    },
+    select: { id: true, idempotencyKey: true },
+  });
+  const idByKey = new Map(rows.map((r) => [r.idempotencyKey, r.id]));
+  return jobs.map((j) => {
+    const id = idByKey.get(j.idempotencyKey);
+    if (!id)
+      throw new Error(`ジョブが見つからない：${j.idempotencyKey}`);
+    return id;
+  });
+}
+
 export async function findJob(id: string, db: Db = getPrisma()) {
   return db.job.findUnique({ where: { id } });
 }

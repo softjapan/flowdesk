@@ -213,6 +213,11 @@ ALTER TABLE reservation
 
 ## インデックス方針（第15章で計測して確定）
 
-- 業務テーブルは `(organizationId, ...)` の複合インデックスを基本にする
-- `reservation (organizationId, startsAt)`：カレンダーとダッシュボード
-- `customer (organizationId, nameKana)`：一覧と検索
+確認日：2026-11-25。顧客 1 万件・予約 10 万件（N-04）で `EXPLAIN (ANALYZE, BUFFERS)` を見て決めた。計測の方法と数値は `docs/performance.md`。**第15章ではインデックスを追加していない。**
+
+- 業務テーブルは `(organizationId, ...)` の複合インデックスを基本にする。組織をまたぐ参照のための `(organizationId, id)` の一意制約も、`organizationId` での絞り込みに使われる
+- `reservation (organizationId, startsAt)`：カレンダー（週 702 件で 0.6ms）、ダッシュボードの集計（今月 3,008 件で 6.5ms）と日別の件数（1.2ms）、前日リマインドで使われることを確かめた
+- `customer (organizationId, nameKana)`：**今の一覧では使われない**。一覧はフリガナを ICU の `ja` の照合順序（`COLLATE "ja-x-icu"`、Node の `localeCompare("ja")` と同じ順）で並べ、列の照合順序（`en_US.utf8`）と違うため。検索は部分一致（`strpos`）なのでインデックスを使えない。1 万件の全件走査と並べ替えで 1 ページ目 10.9ms・500 ページ目 16.8ms・検索 23.6ms で、N-04 には足りる。列の照合順序を `ja-x-icu` にすればこのインデックスで並べ替えられる（試した結果 1 ページ目 0.15ms）ので、消さずに残す
+- 予約から店舗・メニュー・顧客・スタッフへの外部キー（`(organizationId, xxxId)`）の参照側には、インデックスを付けていない。予約のないメニューを消すとき、外部キーの検査が予約を全件走査する（10 万件で 72.8ms、店舗は 11.7ms。`(organizationId, serviceId)` を作ると 0.4ms）。削除はまれな管理の操作なので見送った。走査は**全組織の予約の件数**に比例するので、予約が全体で 100 万件を超える前に `(organizationId, serviceId)`・`(organizationId, locationId)` を足す
+- 顧客の検索が遅くなったら（目安：1 組織の顧客が 10 万件、検索が 100ms を超える）、`pg_trgm` の GIN インデックスを、空白を除いた値の式インデックスで試す（拡張の追加になる）
+- 計測データは 1 つの組織に偏っている。組織が多いデータでの実行計画は確かめていない

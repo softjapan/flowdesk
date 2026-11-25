@@ -19,13 +19,13 @@ import {
 } from "@/server/repositories/catalog";
 import {
   findCustomer,
-  listCustomers,
+  listCustomerOptions,
 } from "@/server/repositories/customers";
 import {
   createReservation as createReservationRow,
   findReservation,
   isReservationOverlapError,
-  listReservations,
+  listReservationsWithNames,
   updateReservationWithVersion,
   type ReservationChanges,
 } from "@/server/repositories/reservations";
@@ -92,6 +92,27 @@ export type Calendar = {
   days: { date: string; reservations: CalendarReservation[] }[];
 };
 
+/**
+ * カレンダー・ダッシュボードの表の 1 行。論理削除された顧客と無効になった
+ * スタッフは、以前（組織の有効な顧客・スタッフの一覧から名前を引いていた
+ * とき）と同じく「（不明）」と表示する
+ */
+export function toReservationListItem(
+  r: Awaited<ReturnType<typeof listReservationsWithNames>>[number],
+): CalendarReservation {
+  return {
+    id: r.id,
+    startsAt: r.startsAt,
+    endsAt: r.endsAt,
+    customerName: r.customer.deletedAt ? "（不明）" : r.customer.name,
+    serviceName: r.service.name,
+    staffName: r.staffProfile.active
+      ? r.staffProfile.displayName
+      : "（不明）",
+    status: r.status,
+  };
+}
+
 export async function getCalendar(
   ctx: OrgContext,
   params: SearchParams,
@@ -101,11 +122,7 @@ export async function getCalendar(
   const todayYmd = toZonedYmd(now, tz);
   const parsed = parseCalendarQuery(params, todayYmd);
 
-  const [staff, customers, services] = await Promise.all([
-    listStaffProfiles(ctx.organizationId),
-    listCustomers(ctx.organizationId),
-    listServices(ctx.organizationId),
-  ]);
+  const staff = await listStaffProfiles(ctx.organizationId);
   // 他の組織や存在しないスタッフの ID は、指定なしとして扱う
   const query: CalendarQuery = {
     ...parsed,
@@ -117,34 +134,24 @@ export async function getCalendar(
   const dayCount = query.view === "day" ? 1 : 7;
   const firstYmd =
     query.view === "day" ? query.date : startOfWeek(query.date);
-  const reservations = await listReservations(ctx.organizationId, {
-    from: zonedToUtc(firstYmd, tz),
-    to: zonedToUtc(addDays(firstYmd, dayCount), tz),
-  });
+  const reservations = await listReservationsWithNames(
+    ctx.organizationId,
+    {
+      from: zonedToUtc(firstYmd, tz),
+      to: zonedToUtc(addDays(firstYmd, dayCount), tz),
+    },
+    query.staffId,
+  );
 
-  const customerById = new Map(customers.map((c) => [c.id, c]));
-  const serviceById = new Map(services.map((s) => [s.id, s]));
-  const staffById = new Map(staff.map((s) => [s.id, s]));
   const days = Array.from({ length: dayCount }, (_, i) => ({
     date: addDays(firstYmd, i),
     reservations: [] as CalendarReservation[],
   }));
+  const dayByYmd = new Map(days.map((d) => [d.date, d]));
   for (const r of reservations) {
-    if (query.staffId && r.staffProfileId !== query.staffId) continue;
-    const day = days.find(
-      (d) => d.date === toZonedYmd(r.startsAt, tz),
-    );
-    day?.reservations.push({
-      id: r.id,
-      startsAt: r.startsAt,
-      endsAt: r.endsAt,
-      customerName:
-        customerById.get(r.customerId)?.name ?? "（不明）",
-      serviceName: serviceById.get(r.serviceId)?.name ?? "（不明）",
-      staffName:
-        staffById.get(r.staffProfileId)?.displayName ?? "（不明）",
-      status: r.status,
-    });
+    dayByYmd
+      .get(toZonedYmd(r.startsAt, tz))
+      ?.reservations.push(toReservationListItem(r));
   }
 
   return {
@@ -194,19 +201,18 @@ export async function getReservationFormOptions(
 ): Promise<ReservationFormOptions> {
   const [customers, services, staff, locations, own] =
     await Promise.all([
-      listCustomers(ctx.organizationId),
+      listCustomerOptions(ctx.organizationId),
       listServices(ctx.organizationId),
       listStaffProfiles(ctx.organizationId),
       listLocations(ctx.organizationId),
       ownStaffProfileId(ctx),
     ]);
   return {
-    customers: customers
-      .sort((a, b) => a.nameKana.localeCompare(b.nameKana, "ja"))
-      .map((c) => ({
-        id: c.id,
-        label: `${c.name}（${c.nameKana}）`,
-      })),
+    // フリガナの順（ICU の ja）は SQL で並べる
+    customers: customers.map((c) => ({
+      id: c.id,
+      label: `${c.name}（${c.nameKana}）`,
+    })),
     services: services.map((s) => ({
       id: s.id,
       label: `${s.name}（${s.durationMinutes} 分）`,

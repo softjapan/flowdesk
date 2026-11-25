@@ -33,8 +33,9 @@ import {
 } from "@/server/repositories/customer-exports";
 import { listCustomers } from "@/server/repositories/customers";
 import {
-  insertJob,
+  insertJobs,
   listUnpublishedJobIds,
+  type NewJob,
 } from "@/server/repositories/jobs";
 import {
   findMember,
@@ -174,7 +175,8 @@ export async function scheduleReminders(
   now: Date,
   dispatch: Dispatch = dispatchJobs,
 ): Promise<number> {
-  const jobIds: string[] = [];
+  // ジョブは最後にまとめて作る（予約ごとに作ると予約の数だけクエリが増える）
+  const jobs: NewJob[] = [];
   for (const org of await listAllOrganizations()) {
     for (const location of await listLocations(org.id)) {
       const tomorrow = addDays(toZonedYmd(now, location.timezone), 1);
@@ -188,19 +190,18 @@ export async function scheduleReminders(
         range,
       );
       for (const r of reservations) {
-        jobIds.push(
-          await insertJob(
-            reservationMailJob(
-              JOB_TYPES.reservationReminder,
-              org.id,
-              r.id,
-              r.startsAt,
-            ),
+        jobs.push(
+          reservationMailJob(
+            JOB_TYPES.reservationReminder,
+            org.id,
+            r.id,
+            r.startsAt,
           ),
         );
       }
     }
   }
+  const jobIds = await insertJobs(jobs);
   // 定期的に何度も呼ぶので、まだキューに送っていないものだけを送る
   // （前回までに積んだものは送信済み。送れなかったものは掃除の処理が拾う）
   await dispatch(await listUnpublishedJobIds(jobIds));

@@ -1,6 +1,6 @@
 # 技術スタックと固定バージョン
 
-確認日：2026-11-23（第14章の追記は 2026-11-25）。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
+確認日：2026-11-23（第14・15章の追記は 2026-11-25）。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
 `package.json` では本番依存を完全一致（`-E`）で固定し、更新は章タグを切り直すときにまとめて行う。
 
 ## 実行環境
@@ -87,3 +87,7 @@
 37. **Cache Components（PPR）と nonce の CSP は両立しない**（同梱のドキュメント `01-app/02-guides/content-security-policy.md`）。`script-src` に `'unsafe-inline'` を残し、CSP は外部の読み込み・送信先・埋め込みの制限に使う。S3 のオリジンが実行時の環境変数で決まるので、CSP は `next.config.ts` の `headers()`（ビルド時に固まる）ではなく proxy で付ける（第14章）
 38. **Better Auth 1.7.27 は `baseURL` を渡さないと、HTTP のリクエストの URL（Host ヘッダー）から公開 URL を作る**（`dist/auth/base.mjs`）。パスワード再設定のメールのリンクが Host ヘッダーで変わるので、`src/server/app-url.ts` で必ず渡し、本番で未設定なら例外にする（第14章）
 39. **Playwright の `route.fulfill` で HTML を返すときは `charset=utf-8` を付ける。** 付けないと日本語の属性が文字化けし、`iframe[title="埋め込み"]` に一致しない。また、公開のホスト名（`evil.example`）のページから `localhost` を iframe に入れると、Chrome の Local Network Access で CSP より前に止まる。他のオリジンは `127.0.0.1` で作る（第14章）
+40. **第15章では依存を追加していない。** 大量データの投入（`scripts/perf/seed-large.ts`、`pg` と SQL の `generate_series`）、Service の計測（`scripts/perf/bench.ts`、Prisma の `query` イベント）、負荷試験（`scripts/perf/load-test.ts`、Node 24 の `fetch`）は tsx で動く自前のスクリプトにした（k6・autocannon などは入れない）。方法と結果は `docs/performance.md`（第15章）
+41. **Next.js 16.4.6 で `partialPrefetching: true` にすると、Cookie を読むページは 1 回のリクエストで 2 回描画される。** ページの描画と並んで、プリフェッチ用の描画（ランタイムのプリレンダー）が同じリクエストで実行され（`dist/server/app-render/app-render.js` の `spawnRuntimePrefetchWithFilledCaches`）、キャッシュしていない DB の読み込みがすべて 2 回ずつ走る。DB のログで、どの画面も同じクエリの組が別の接続から同時に 2 回出ることで分かった。`getSession` の最初で `await connection()` すると、その先はプリレンダーから外れ、クエリ数が半分になる（第15章、`src/server/session.ts`）
+42. **PostgreSQL 18.7（`postgres:18.7` イメージ）の `ORDER BY ... COLLATE "ja-x-icu"` は、Node 24 の `localeCompare(..., "ja")` と同じ順に並ぶ。** DB の既定の照合順序（`en_US.utf8`）では、濁点・半濁点の付いたカナの順が変わる（ハナ・バア・パイ → ja ではバア・パイ・ハナ）。顧客一覧の並べ替えを SQL に移すときに確かめた（第15章、`performance.db.test.ts`）
+43. **Prisma 7.10 の `$queryRaw` は `count(*)` を `bigint` で返す。** `Number()` に直してから返す。関連を JOIN で 1 回に読む `relationJoins` はプレビュー機能のままなので使わず、`select` で関連の名前だけを取る（予約 1 回＋関連ごとに 1 回）

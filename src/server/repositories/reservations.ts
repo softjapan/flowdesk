@@ -1,3 +1,4 @@
+import { Prisma } from "@/generated/prisma/client";
 import { type Db, getPrisma } from "@/server/db";
 import type { ReservationStatus } from "@/server/domain";
 
@@ -14,6 +15,96 @@ export async function listReservations(
     },
     orderBy: [{ startsAt: "asc" }, { id: "asc" }],
   });
+}
+
+/**
+ * カレンダーとダッシュボードの表に出す予約（startsAt が [from, to)）。
+ * 顧客・メニュー・担当の名前を同じ呼び出しで取る（第15章。以前は名前を
+ * 引くために組織の顧客を全件読んでいた）。参照は (organizationId, xxxId)
+ * の複合外部キーなので、他の組織の行にはつながらない
+ */
+export async function listReservationsWithNames(
+  organizationId: string,
+  range: { from: Date; to: Date },
+  staffProfileId: string | null = null,
+  db: Db = getPrisma(),
+) {
+  return db.reservation.findMany({
+    where: {
+      organizationId,
+      startsAt: { gte: range.from, lt: range.to },
+      ...(staffProfileId && { staffProfileId }),
+    },
+    select: {
+      id: true,
+      startsAt: true,
+      endsAt: true,
+      status: true,
+      customer: { select: { name: true, deletedAt: true } },
+      service: { select: { name: true } },
+      staffProfile: { select: { displayName: true, active: true } },
+    },
+    orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+  });
+}
+
+export type ReservationSummary = {
+  reservationCount: number;
+  customerCount: number;
+  revenueYen: number;
+};
+
+/**
+ * startsAt が [from, to) の、キャンセルを除いた予約の件数・顧客数（重複
+ * なし）・料金の合計。行を読まずに DB で集計する（ダッシュボード）
+ */
+export async function summarizeReservations(
+  organizationId: string,
+  range: { from: Date; to: Date },
+  db: Db = getPrisma(),
+): Promise<ReservationSummary> {
+  const [row] = await db.$queryRaw<
+    {
+      reservationCount: bigint;
+      customerCount: bigint;
+      revenueYen: bigint;
+    }[]
+  >(Prisma.sql`
+    SELECT count(*) AS "reservationCount",
+           count(DISTINCT "customerId") AS "customerCount",
+           coalesce(sum("priceYen"), 0)::bigint AS "revenueYen"
+    FROM reservation
+    WHERE "organizationId" = ${organizationId}
+      AND "startsAt" >= ${range.from} AND "startsAt" < ${range.to}
+      AND status <> 'cancelled'`);
+  return {
+    reservationCount: Number(row?.reservationCount ?? 0),
+    customerCount: Number(row?.customerCount ?? 0),
+    revenueYen: Number(row?.revenueYen ?? 0),
+  };
+}
+
+/**
+ * startsAt が [from, to) の、キャンセルを除いた予約の日別の件数。日付は
+ * timezone での YYYY-MM-DD（toZonedYmd と同じ）。予約のない日は返らない
+ */
+export async function countReservationsByDay(
+  organizationId: string,
+  range: { from: Date; to: Date },
+  timezone: string,
+  db: Db = getPrisma(),
+): Promise<Map<string, number>> {
+  const rows = await db.$queryRaw<{ date: string; count: bigint }[]>(
+    Prisma.sql`
+      SELECT to_char("startsAt" AT TIME ZONE ${timezone}, 'YYYY-MM-DD') AS date,
+             count(*) AS count
+      FROM reservation
+      WHERE "organizationId" = ${organizationId}
+        AND "startsAt" >= ${range.from} AND "startsAt" < ${range.to}
+        AND status <> 'cancelled'
+      GROUP BY 1`,
+  );
+  return new Map(rows.map((r) => [r.date, Number(r.count)]));
 }
 
 export async function findReservation(

@@ -8,8 +8,6 @@ import {
 } from "@/components/ui/card";
 import {
   Table,
-  TableBody,
-  TableCell,
   TableHead,
   TableHeader,
   TableRow,
@@ -19,6 +17,7 @@ import { formatYen } from "@/lib/money";
 import { getDashboard } from "@/server/services/dashboard";
 import { getOrgContext } from "@/server/services/org-context";
 import { getCurrentUserId } from "@/server/session";
+import { CompactTableBody } from "./_components/compact-table";
 import { StatusBadge } from "./_components/status-badge";
 import { TrendChart } from "./_components/trend-chart";
 
@@ -130,22 +129,22 @@ export default async function DashboardPage({
                 <TableHead>状態</TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody>
+            <CompactTableBody>
               {today.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="tabular-nums">
+                <tr key={r.id}>
+                  <td className="tabular-nums">
                     {formatTime(r.startsAt, timezone)}〜
                     {formatTime(r.endsAt, timezone)}
-                  </TableCell>
-                  <TableCell>{r.customerName}</TableCell>
-                  <TableCell>{r.serviceName}</TableCell>
-                  <TableCell>{r.staffName}</TableCell>
-                  <TableCell>
+                  </td>
+                  <td>{r.customerName}</td>
+                  <td>{r.serviceName}</td>
+                  <td>{r.staffName}</td>
+                  <td>
                     <StatusBadge status={r.status} />
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               ))}
-            </TableBody>
+            </CompactTableBody>
           </Table>
         )}
       </section>
