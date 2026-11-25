@@ -46,6 +46,8 @@ FROM ${NODE_IMAGE} AS runtime
 RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm \
     /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn \
     /usr/local/bin/yarnpkg /opt/yarn-*
+# RDS のサーバー証明書を検証する CA（DATABASE_URL の sslrootcert、docker/rds-ca/README.md）
+COPY --chown=root:root --chmod=444 docker/rds-ca/rds-ca-rsa2048-g1.crt /etc/ssl/rds/
 WORKDIR /app
 
 # ---- Web（Next.js の standalone の server.js） ---------------------------
@@ -90,6 +92,9 @@ ENV NODE_ENV=production
 RUN apt-get update && apt-get install -y --no-install-recommends openssl \
   && rm -rf /var/lib/apt/lists/* \
   && npm rebuild prisma @prisma/engines
+# web・worker と同じ CA。prisma7.config.ts が DATABASE_URL の verify-full を
+# CLI の書き方（sslcert・sslaccept=strict）に直して使う
+COPY --chown=root:root --chmod=444 docker/rds-ca/rds-ca-rsa2048-g1.crt /etc/ssl/rds/
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "deploy"]

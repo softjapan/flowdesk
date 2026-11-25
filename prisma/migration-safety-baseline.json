@@ -1,0 +1,17 @@
+{
+  "$comment": "適用済みで書き換えられないマイグレーションへの npm run migrations:check の指摘と、問題にしない理由（第17章、docs/migrations.md）。新しいマイグレーションはここに足さず、SQL の文の直前に -- migration-safety: allow <rule> <理由> を書く",
+  "entries": [
+    {
+      "migration": "20261124150000_uploads_exports_jobs",
+      "rule": "add-not-null-column",
+      "line": 14,
+      "reason": "attachment.fileName・uploadedByUserId。第11章で開発環境だけに適用した（本番は未デプロイ）。本番の初回の migrate では attachment が空で、古い版の web も動いていないので失敗しない"
+    },
+    {
+      "migration": "20261124150000_uploads_exports_jobs",
+      "rule": "create-index-blocking",
+      "line": 64,
+      "reason": "attachment_organizationId_id_key。上と同じく、本番の初回の migrate では attachment が空で、書き込みを止める時間がない"
+    }
+  ]
+}

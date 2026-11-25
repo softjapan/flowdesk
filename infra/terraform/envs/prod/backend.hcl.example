@@ -1,6 +1,15 @@
-# 第17章：state 用のバケットを作ってから
-#   cp backend.hcl.example backend.hcl
-#   terraform init -backend-config=backend.hcl
+# 本番の state の置き場所（第17章、docs/ci-cd.md の「初回の手順」）。
+# 1. infra/terraform/bootstrap で state 用のバケットを作る（terraform output state_bucket）
+# 2. cp backend.hcl.example backend.hcl（backend.hcl は .gitignore 済み）し、bucket を書き換える
+# 3. terraform init -backend-config=backend.hcl
+#
+# - state には CloudFront → ALB のヘッダーの値（X-Origin-Verify）が平文で入る。
+#   DB のパスワードと BETTER_AUTH_SECRET は書き込み専用の属性なので入らない
+# - バケットは暗号化・バージョニング・TLS 必須・パブリックアクセスのブロック、
+#   読み書きできるのは state_admin_principal_arns だけ（bootstrap の bucket policy）
+# - ロックは S3 のファイル（use_lockfile。Terraform 1.10 以降）。DynamoDB は使わない
+# - GitHub Actions のデプロイ（deploy.yml）は Terraform を実行しないので、
+#   デプロイのロールに state の権限はない
 bucket       = "flowdesk-tfstate-111122223333"
 key          = "prod/terraform.tfstate"
 region       = "ap-northeast-1"

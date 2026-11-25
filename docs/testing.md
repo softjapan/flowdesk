@@ -91,20 +91,24 @@ Service を足すとき・変えるときは、次を順に確かめる（第13�
 - SQL に移した処理（顧客の検索・並べ替え・ダッシュボードの集計）は、以前の Node での処理と同じ結果になることを、別の方法で数えた値と比べて確かめる（`services/performance.db.test.ts`）
 - 時間の計測（`npm run perf:bench`・`npm run perf:load`）はテストに入れない。マシンと負荷で値が変わるため。手順と結果は `docs/performance.md`
 
-## CI で回すもの
+## CI で回すもの（`.github/workflows/ci.yml`、第17章）
 
-| ジョブ | いつ | 内容 | 必要なもの |
-|--------|------|------|-----------|
-| check | すべての push と PR | `npm ci` → `npm run check`（型・Lint・整形・単体・秘密情報の検出） | なし |
-| build | すべての push と PR | `npm run build`（**`DATABASE_URL` を設定しない**。第8章の回帰） | なし |
-| test-db | すべての push と PR | `npm run test:db` | PostgreSQL 18.7（サービスコンテナ。`TEST_DATABASE_URL` を渡す） |
-| e2e | PR と main | `npx playwright install --with-deps chromium` → `npm run test:e2e` | PostgreSQL・RustFS（`S3_ENDPOINT` と鍵）。失敗したら `playwright-report/` と `test-results/`（trace）を成果物に残す |
-| security | 週 1 回と、依存を更新する PR | `npm run audit:check`・`npm run secrets:scan -- --history`（`docs/security.md`） | レジストリへの接続。clone は全履歴（`fetch-depth: 0`） |
+PR と main への push で、次のジョブをすべて回す（security だけは週 1 回の定期実行でも回す）。ワークフローの決まり（SHA での固定・権限）とデプロイは `docs/ci-cd.md`。**第17章ではワークフローを作っただけで、GitHub 上では実行していない**（構文は actionlint で確かめた）。
+
+| ジョブ | 内容 | 必要なもの |
+|--------|------|-----------|
+| check | `npm ci` → `npm run check`（型・Lint・整形・単体・秘密情報の検出・マイグレーションの危険な操作） | なし |
+| build | `npm run build`（**`DATABASE_URL` を設定しない**。`env -u` で外す。第8章の回帰） | なし |
+| test-db | `npm run test:db` | PostgreSQL 18.7（サービスコンテナ。`TEST_DATABASE_URL` を渡す） |
+| e2e | `npx playwright install --with-deps chromium` → `npm run test:e2e` | PostgreSQL・RustFS（サービスコンテナ。`S3_ENDPOINT` とローカル用の鍵）。失敗したら `playwright-report/` と `test-results/`（trace）を成果物に残す |
+| terraform | `terraform fmt -check`、`envs/prod` と `bootstrap` の `validate`・`test`（モック） | Terraform 1.17.2。AWS には接続しない |
+| migrations | `npm run migrations:check -- --base <ベース>`（適用済みのマイグレーションの変更・削除も止める。`docs/migrations.md`） | 全履歴（`fetch-depth: 0`） |
+| security | `npm run audit:check`・`npm run secrets:scan -- --history`（`docs/security.md`） | レジストリへの接続。clone は全履歴 |
 
 - CI（`CI=1`）では E2E の再試行を 2 回にし、`test.only` を禁止する。ローカルは再試行しない（不安定なテストを隠さない）
 - 再試行で通ったテスト（flaky）は放置せず、原因を直す。データの衝突なら `freeDate`・`uniqueSuffix` を使っているか確かめる
 - 本番の鍵（Stripe など）は CI に渡さない。Stripe は署名を自分で作るテスト（`test/stripe-events.ts`）で確かめる
-- ワークフローの定義（GitHub Actions）は、AWS へのデプロイと合わせて第16〜17章で作る
+- デプロイの手順（`scripts/deploy/ecs-deploy.mts`）は単体のテスト（`ecs-deploy.test.ts`）で、aws CLI を偽物に差し替えて確かめる：migrate が終わってから web・worker を更新する、migrate が失敗したら更新しない、サーキットブレーカーが戻したら失敗にする
 
 ## ローカルでの実行
 

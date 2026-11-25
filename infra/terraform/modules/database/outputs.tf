@@ -21,3 +21,7 @@ output "identifier" {
 output "security_group_id" {
   value = aws_security_group.this.id
 }
+
+output "ca_cert_identifier" {
+  value = var.ca_cert_identifier
+}

@@ -38,7 +38,7 @@ variable "price_class" {
 }
 
 variable "web_acl_id" {
-  description = "AWS WAF の Web ACL（第17章。null なら付けない）"
+  description = "AWS WAF の Web ACL の ARN（modules/waf。null なら付けない）"
   type        = string
   default     = null
 }

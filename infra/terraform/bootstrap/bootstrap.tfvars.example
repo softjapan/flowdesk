@@ -1,0 +1,3 @@
+# cp bootstrap.tfvars.example bootstrap.tfvars（*.tfvars は .gitignore 済み）
+bucket_name                = "flowdesk-tfstate-111122223333"
+state_admin_principal_arns = ["arn:aws:iam::111122223333:role/flowdesk-terraform-admin"]

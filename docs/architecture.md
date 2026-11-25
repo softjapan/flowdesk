@@ -1,6 +1,8 @@
 # 本番のアーキテクチャ（AWS、東京リージョン）
 
-確認日：2026-11-25（第16章）。第16章では設計とコード（Dockerfile・Terraform）までを行い、**本物の AWS には一切接続しない**（`terraform plan`・`apply`・aws CLI は実行しない。AWS の認証情報はこの環境にない）。state・DNS・WAF・CI/CD・初回のデプロイは第17章で仕上げる。
+確認日：2026-11-25（第16〜17章）。第16章では設計とコード（Dockerfile・Terraform）までを行い、第17章で state の置き場所・WAF・監視・RDS の証明書の検証・CI/CD（GitHub Actions と OIDC のデプロイのロール）を足した。どちらの章も**本物の AWS には一切接続しない**（`terraform plan`・`apply`・aws CLI は実行しない。AWS の認証情報はこの環境にない）。DNS・証明書の発行・SES・初回のデプロイは手順だけを書いた（`docs/ci-cd.md` の 4）。
+
+- CI/CD とデプロイの手順は `docs/ci-cd.md`、マイグレーションの流し方は `docs/migrations.md`
 
 - 認可・テナントの規則は `docs/authz-matrix.md`、秘密情報とヘッダーの方針は `docs/security.md`、性能の計測は `docs/performance.md` を正とする
 - 版は `docs/tech-stack.md`（Terraform 1.17.2、hashicorp/aws 6.74.0、hashicorp/random 3.9.1）
@@ -63,7 +65,8 @@ flowchart LR
 
 | サービス | 役割 | 主な設定（Terraform のモジュール） |
 |----------|------|--------------------------------------|
-| CloudFront | 入口。TLS の終端、HTTP/2・3、静的ファイルのキャッシュ | 画面と API は CachingDisabled＋AllViewer（Host・Cookie・クエリ・`rsc` などのヘッダーをそのまま渡す）。`/_next/static/*` は CachingOptimized。ALB への接続は HTTPS だけで、`X-Origin-Verify` ヘッダーを付ける（`modules/cdn`） |
+| CloudFront | 入口。TLS の終端、HTTP/2・3、静的ファイルのキャッシュ | 画面と API は CachingDisabled＋AllViewer（Host・Cookie・クエリ・`rsc` などのヘッダーをそのまま渡す）。`/_next/static/*` は CachingOptimized。マネージドポリシーの ID は名前で引いた ID と plan のときに照合する（precondition）。ALB への接続は HTTPS だけで、`X-Origin-Verify` ヘッダーを付ける（`modules/cdn`） |
+| AWS WAF（第17章） | CloudFront の前の検査 | us-east-1。`/api/webhooks/` の本文が 64KB を超えたら止める（本文を 64KB まで見る設定）、IP の評判・既知の不正な入力のマネージドルールで止める、共通のルール（CommonRuleSet）は既定では数えるだけ、IP ごとに 5 分 2,000 回まで（`modules/waf`。`enable_waf = false` で外せる） |
 | ALB | CloudFront からのリクエストを web のタスクに振り分ける | セキュリティグループは CloudFront のオリジン向けのマネージドプレフィックスリストからの 443 だけ。ヘッダーが一致しなければ 403。`drop_invalid_header_fields`。ヘルスチェックは DB を使わない `/login`（`modules/alb`） |
 | ECS Fargate：web | Next.js（`output: "standalone"` の `server.js`） | 0.5 vCPU・1GB・ARM64、2〜4 タスク（CPU 60% で増減）。デプロイは新しいタスクが健康になってから古いものを止め、失敗したら自動で戻す（`modules/ecs`） |
 | ECS Fargate：worker | SQS のジョブ（メール・CSV・前日リマインド）、未送信のジョブの送り直し | 0.25 vCPU・0.5GB・ARM64、1 タスク。`stopTimeout` 120 秒（SIGTERM の後、処理中のメッセージを終える） |
@@ -73,8 +76,8 @@ flowchart LR
 | SQS | ジョブのキュー（Outbox から送る、第11章） | `flowdesk-jobs`（可視性タイムアウト 60 秒）と `flowdesk-jobs-dlq`。`maxReceiveCount = 3`。SSE。DLQ に 1 件でも入ればアラーム（`modules/queue`）。名前と設定は `docker/elasticmq.conf` と同じ |
 | SES | メールの送信（招待・パスワード再設定・CSV の完了・前日リマインド） | Worker が SMTP（`email-smtp.ap-northeast-1.amazonaws.com:587`、STARTTLS）で送る。ドメインの検証・DKIM・サンドボックスの解除は第17章 |
 | Secrets Manager | 秘密の値 | 4 つ（§4）。ECS が起動時に読み、環境変数としてコンテナに渡す（`modules/secrets`） |
-| CloudWatch | ログ・メトリクス・アラーム | ロググループ `/ecs/flowdesk-prod/{web,worker,migrate}`（30 日）。RDS の `postgresql` ログ。DLQ のアラーム。通知先（SNS）と、ALB の 5xx・RDS の CPU・空き容量のアラームは第17章 |
-| ECR | イメージ | `flowdesk-prod/{web,worker,migrate}`。タグは上書きできない（IMMUTABLE）、push 時にスキャン、直近 30 個を残す |
+| CloudWatch・SNS | ログ・メトリクス・アラーム | ロググループ `/ecs/flowdesk-prod/{web,worker,migrate}`（30 日）。RDS の `postgresql` ログ。アラームは SNS（`flowdesk-prod-alarms`、`alarm_emails` にメール）に送る：DLQ、ALB の 5xx（ターゲット・ALB）・異常なターゲット、RDS の CPU・空き容量・接続数（`modules/monitoring`、第17章）。`/api/health` の外形監視は未定 |
+| ECR | イメージ | `flowdesk-prod/{web,worker,migrate}`。タグは上書きできない（IMMUTABLE）、push 時にスキャン、直近 30 個を残す。push は GitHub Actions（OIDC で引き受けるロール、`modules/deploy`、第17章） |
 
 ## 3. リクエストとジョブの流れ
 
@@ -97,7 +100,7 @@ ECS のタスク定義には、秘密でない値（`environment`）と、Secret
 
 | 変数 | 渡し方 | 値を入れるのは | web | worker | migrate |
 |------|--------|----------------|:---:|:------:|:-------:|
-| `DATABASE_URL` | Secrets Manager `flowdesk/prod/database-url` | Terraform（`ephemeral "random_password"` → RDS の `password_wo` と `secret_string_wo`。state に残らない） | ○ | ○ | ○ |
+| `DATABASE_URL` | Secrets Manager `flowdesk/prod/database-url`。`?sslmode=verify-full&sslrootcert=/etc/ssl/rds/rds-ca-rsa2048-g1.crt`（第17章） | Terraform（`ephemeral "random_password"` → RDS の `password_wo` と `secret_string_wo`。state に残らない） | ○ | ○ | ○ |
 | `BETTER_AUTH_SECRET` | Secrets Manager `flowdesk/prod/better-auth-secret` | Terraform（同上、48 文字） | ○ | | |
 | `STRIPE_SECRET_KEY`・`STRIPE_WEBHOOK_SECRET`・`STRIPE_PRICE_PRO` | Secrets Manager `flowdesk/prod/stripe`（JSON のキー） | 人（Stripe のダッシュボードの値） | ○ | | |
 | `SMTP_USER`・`SMTP_PASSWORD` | Secrets Manager `flowdesk/prod/smtp`（JSON のキー） | 人（SES の SMTP の認証情報） | | ○ | |
@@ -107,11 +110,12 @@ ECS のタスク定義には、秘密でない値（`environment`）と、Secret
 
 - **`BETTER_AUTH_URL`（第14章）**：Better Auth は `baseURL` がないと Host ヘッダーから公開 URL を作り、パスワード再設定のリンクを攻撃者のホストに向けられる。`src/server/app-url.ts` は本番で未設定・不正なら例外にする。Terraform は `domain_name`（スキームなしのホスト名。検証あり）から `https://` の URL を作り、web と worker（メールのリンク）に渡す。S3 の CORS の許可も同じ値から作る
 - **worker は Stripe の鍵と `BETTER_AUTH_SECRET` を持たない**（使わない）。実行ロールが読めるのはこの 4 つのシークレットだけ（`secretsmanager:GetSecretValue`）
+- **RDS のサーバー証明書の検証（第17章）**：第16章の `sslmode=no-verify` は暗号化するが相手を確かめない。RDS に指定した CA（`ca_cert_identifier = "rds-ca-rsa2048-g1"`）をイメージの `/etc/ssl/rds/` に入れ（`docker/rds-ca/README.md`）、`verify-full` で CA とホスト名を検証する。アプリ（`pg`）はこの URL のまま検証する。**Prisma 7.10 の CLI（migrate）は `sslrootcert` と `verify-full` を知らず、検証せずに接続する**ので、`prisma7.config.ts` が `sslmode=require&sslcert=<CA>&sslaccept=strict` に直して渡す（`prisma/cli-database-url.ts`）。CLI の `sslcert` はファイルの最初の証明書しか使わないので、CA は 1 つだけのファイルにする。手元の TLS 必須の PostgreSQL（偽の CA を 2 つ前に置いたバンドルを含む）で、migrate・worker のイメージとも、本物の CA では接続でき、別の CA・ホスト名の違い・CA なしでは失敗することを確かめた。書式を変えたので、初回より後に適用するなら `db_password_version` を上げる（`secret_string_wo` は版を上げたときだけ書き換わる）
 - `stripe` と `smtp` は Terraform が器だけを作る。**値が入っていないと ECS はタスクを起動できない**ので、初回のデプロイの前に人が入れる（第17章の手順。ダッシュボード、または管理者の端末から）。中身の形：
   - `flowdesk/prod/stripe`：`{"STRIPE_SECRET_KEY":"…","STRIPE_WEBHOOK_SECRET":"…","STRIPE_PRICE_PRO":"price_…"}`（本番の鍵を使い始めるときは `docs/billing.md` を見直す）
   - `flowdesk/prod/smtp`：`{"SMTP_USER":"…","SMTP_PASSWORD":"…"}`（SES の SMTP の認証情報）
 - パスワードを変えるときは `db_password_version` を 1 つ上げて apply する（RDS と `DATABASE_URL` が同じ実行の同じ値で書き換わる）。`BETTER_AUTH_SECRET` は `better_auth_secret_version`（全員のセッションが切れる）
-- CloudFront → ALB の `X-Origin-Verify` の値は CloudFront の設定に平文で入るため、書き込み専用にできず state に残る。state のバケットは暗号化し、読める人を絞る（第17章）
+- CloudFront → ALB の `X-Origin-Verify` の値は CloudFront の設定に平文で入るため、書き込み専用にできず state に残る。state のバケット（`infra/terraform/bootstrap`、第17章）は暗号化・バージョニング・TLS 必須で、バケットのポリシーで `state_admin_principal_arns` 以外の読み書きを拒否する。デプロイのロールは state を読めない
 
 ## 5. ネットワークとセキュリティグループ
 
@@ -218,7 +222,7 @@ migrate → web・worker の順に起動する。ECS と同じく、ルートを
 
 - RDS を Single-AZ にすると 79.25 → 39.26 で、合計は**約 173**。NAT Gateway を AZ ごと（2 つ）にすると ＋45.26（IPv4 も 1 つ増えて ＋3.65）
 - 大きいのは RDS（37%）、NAT Gateway（22%）、Fargate（21%）、ALB（11%）。台数・サイズが固定の費用がほとんどで、利用者の数ではあまり変わらない
-- 第17章で WAF（Web ACL ＋ マネージドルール 5 つ ＋ 100 万リクエスト）を足すと ＋10.60
+- 第17章で足したもの：WAF（Web ACL 5.00 ＋ ルール 5 つ〈Webhook の本文・マネージド 3 つ・回数の上限〉5.00 ＋ 100 万リクエスト 0.60）で ＋10.60、アラームは DLQ と合わせて 7 個（上の計算は 5 個）で ＋0.20、SNS（メール）はほぼ 0。合計は**約 224**。WAF が本文を 16KB より多く（64KB まで）見る分の追加の料金は Price List で確かめていない（**要確認**）
 
 ### 含めていないもの（要確認）
 
@@ -235,6 +239,7 @@ migrate → web・worker の順に起動する。ECS と同じく、ルートを
 
 ```
 infra/terraform/
+├── bootstrap/            # state 用の S3 バケット（第17章。state は手元）＋ tests/bootstrap.tftest.hcl
 ├── envs/prod/            # 本番の構成（モジュールをつなぐ）。terraform はここで実行する
 │   ├── main.tf           # provider・ephemeral の秘密・モジュール
 │   ├── variables.tf      # domain_name・証明書・image_tag など（検証つき）
@@ -251,7 +256,10 @@ infra/terraform/
     ├── secrets/   # Secrets Manager
     ├── alb/       # ALB・ターゲットグループ・リスナー・SG
     ├── cdn/       # CloudFront
-    └── ecs/       # ECR・クラスター・ロググループ・IAM・タスク定義・サービス・オートスケーリング・SG
+    ├── ecs/       # ECR・クラスター・ロググループ・IAM・タスク定義・サービス・オートスケーリング・SG
+    ├── waf/       # AWS WAF（CloudFront 用、us-east-1。第17章）
+    ├── monitoring/ # SNS とアラーム（第17章）
+    └── deploy/    # GitHub OIDC のプロバイダーとデプロイのロール（第17章）
 ```
 
 手元での確認（AWS に接続しない。`terraform init` はプロバイダーを Terraform Registry から取得する）：
@@ -262,27 +270,34 @@ terraform fmt -check -recursive
 cd envs/prod
 terraform init -backend=false
 terraform validate
-terraform test     # 14 の run。aws はモック、random は手元で値を作るだけ
+terraform test     # 23 の run。aws はモック（us-east-1 の別名も）、random は手元で値を作るだけ
+cd ../../bootstrap && terraform init && terraform test   # 2 の run
 ```
 
 `terraform test` が確かめること：RDS が公開されていない（`publicly_accessible = false`、db サブネットだけ、db のルートテーブルに外への経路がない、SG の 5432 は ECS の SG からだけ）、暗号化・削除保護・Multi-AZ・`rds.force_ssl`、パスワードが state にない／S3 のパブリックアクセスのブロック 4 つ・ACL 無効・CORS・TLS 必須／SQS の `maxReceiveCount = 3` と DLQ・アラーム／タスクが非 root（`1000:1000`）・読み取り専用のルート・capability なし・ARM64・パブリック IP なし／秘密が環境変数にない（名前と、接続文字列の値）・web・worker・migrate に渡すシークレットの組・`BETTER_AUTH_URL` が `https://<domain_name>`・`S3_ENDPOINT` などがない／実行ロールとタスクロールに `*` がない／ALB は CloudFront のプレフィックスリストからだけ・ヘッダーがなければ 403／CloudFront は HTTPS・キャッシュの方針・Host の転送／入力の検証（スキーム付きのドメイン、us-east-1 以外の CloudFront の証明書、`latest` のタグ、`http://` の CORS、environment に秘密）。
 
 テストが空振りしていないことは、設定を一時的に壊して確かめた（RDS を公開・`maxReceiveCount = 5`・`restrict_public_buckets = false`・`user = "0:0"`・環境変数に `STRIPE_SECRET_KEY`・`BETTER_AUTH_URL` を `http://localhost:3000`。どれも該当の run が失敗した）。
 
+第17章で足したテスト：デプロイのロールの信頼ポリシー（このリポジトリの production の environment だけ、`StringEquals`、`aud`）と権限（`*` はリソースを指定できない操作だけ、PassRole は ECS のタスクにだけ、RunTask は migrate だけ）、`*` を含むリポジトリ・environment の拒否、既存の OIDC プロバイダーの再利用／WAF の Webhook の本文の上限・共通のルールは数えるだけ・上限の検証／アラームが SNS に通知する／`DATABASE_URL` が `verify-full` でイメージの CA を使う・イメージにない CA の拒否／state のバケットの暗号化・バージョニング・公開の禁止・管理者以外の拒否。信頼ポリシーのテストは、4 通りに緩めて失敗することを確かめた（`docs/ci-cd.md` の 2）。
+
+**CloudFront のマネージドポリシーの ID**：モックでは `aws_cloudfront_cache_policy` などのデータソースの `id` が常に `null` になり（入力にもなる属性なので、`mock_data` の既定値も `override_data` も効かない。最小の構成で確かめた）、名前で引いた ID をテストで確かめられない。ID は AWS の公開の値を書き、名前で引いた ID と違えば plan で止まる precondition にした（モックの `null` のときは飛ばす）。
+
 **モックのテストで分からないこと**：AWS の API が受け付けるか（名前の長さ・組み合わせの制約、RDS で使える PostgreSQL のマイナーバージョン、マネージドポリシーの ID）、IAM の権限で実際に動くか、証明書と DNS。これらは第17章の `terraform plan` と初回のデプロイで確かめる。
 
-## 9. 要確認・第17章に残すこと
+## 9. 要確認・第17章に残したこと
+
+第17章での扱い（**済**＝手元で確かめた、**手順**＝`docs/ci-cd.md` に手順を書いた、**残す**＝本物の AWS か判断が要る）：
 
 | 項目 | 内容 |
 |------|------|
-| RDS の証明書の検証 | `DATABASE_URL` は `sslmode=no-verify`（TLS で暗号化するが、サーバー証明書を検証しない）。RDS の CA（公開の CA ではない）をイメージに入れ、`sslmode=verify-full&sslrootcert=…` にする（`pg-connection-string` は `sslrootcert` のファイルを読む） |
-| RDS のマイナーバージョン | `engine_version = "18"`（RDS の既定のマイナー）。ローカルの 18.7 と同じものが RDS にあるかは要確認 |
-| Fargate のボリュームの持ち主 | Fargate の空のボリュームは root の持ち物になる可能性があり、UID 1000 で `/tmp`・`/app/.next/cache` に書けるかを実環境で確かめる（手元の Docker では確かめた） |
-| CloudFront のマネージドポリシーの ID | CachingDisabled・CachingOptimized・AllViewer の ID を、適用前にコンソールか `data "aws_cloudfront_cache_policy"` で照合する（モックのテストでは確かめられない） |
-| state | S3 のバケット（暗号化・バージョニング・`use_lockfile`）。`backend.hcl.example` |
-| DNS・証明書 | ACM（ap-northeast-1 と us-east-1）の発行と DNS の検証、`domain_name` を CloudFront に向ける |
-| SES | ドメインの検証・DKIM・サンドボックスの解除・SMTP の認証情報の作成と `flowdesk/prod/smtp` への登録 |
-| Webhook の本文の上限（`docs/security.md` の 1 の 9） | ALB には本文の大きさの上限の設定がない。WAF のサイズ制約のルールで扱う |
-| 監視 | SNS の通知先、ALB の 5xx・ターゲットの異常、RDS の CPU・空き容量・接続数、`/api/health` の外形監視 |
-| CI/CD | `linux/arm64` のビルド → ECR に push（Git のコミットをタグに）→ migrate を run-task → web・worker のタスク定義を更新 |
-| Worker のイメージの大きさ | 972MB。バンドルするか、依存を分けるか |
+| RDS の証明書の検証 | **済**。`verify-full`・イメージに CA・Prisma の CLI 用の変換（§4）。以下は第16章の記述 | `DATABASE_URL` は `sslmode=no-verify`（TLS で暗号化するが、サーバー証明書を検証しない）。RDS の CA（公開の CA ではない）をイメージに入れ、`sslmode=verify-full&sslrootcert=…` にする（`pg-connection-string` は `sslrootcert` のファイルを読む） |
+| RDS のマイナーバージョン | **残す**（初回の `plan`）。`engine_version = "18"`（RDS の既定のマイナー）。ローカルの 18.7 と同じものが RDS にあるかは要確認 |
+| Fargate のボリュームの持ち主 | **残す**（初回のデプロイ）。Fargate の空のボリュームは root の持ち物になる可能性があり、UID 1000 で `/tmp`・`/app/.next/cache` に書けるかを実環境で確かめる（手元の Docker では確かめた） |
+| CloudFront のマネージドポリシーの ID | **済**（plan で照合する precondition。§8）。CachingDisabled・CachingOptimized・AllViewer の ID を、適用前にコンソールか `data "aws_cloudfront_cache_policy"` で照合する（モックのテストでは確かめられない） |
+| state | **済**。`infra/terraform/bootstrap`（暗号化・バージョニング・TLS 必須・管理者以外の拒否）と `backend.hcl.example`（`use_lockfile`） |
+| DNS・証明書 | **手順**。ACM（ap-northeast-1 と us-east-1）の発行と DNS の検証、`domain_name` を CloudFront に向ける |
+| SES | **手順**。ドメインの検証・DKIM・サンドボックスの解除・SMTP の認証情報の作成と `flowdesk/prod/smtp` への登録 |
+| Webhook の本文の上限（`docs/security.md` の 1 の 9） | **済**（`modules/waf`、64KB）。Stripe の Webhook の本文の大きさの実際の分布は**残す**（本番のログで確かめ、上限を見直す） |
+| 監視 | **済**（`modules/monitoring`）。`/api/health` の外形監視は**残す**（Route 53 のヘルスチェックか Synthetics か、費用を見て決める） |
+| CI/CD | **済**（`docs/ci-cd.md`。ワークフローは作っただけで GitHub では未実行）。`linux/arm64` のビルド → ECR に push（Git のコミットをタグに）→ migrate を run-task → web・worker のタスク定義を更新 |
+| Worker のイメージの大きさ | **残す**。972MB。バンドルするには esbuild を直接の依存にする必要があり、`CLAUDE.md` の「表にない依存は先に提案して確認」に当たるので、第17章では入れていない（提案：esbuild で `src/worker/index.ts` を 1 ファイルにまとめ、`pg`・`nodemailer`・AWS SDK・Prisma の生成物だけを残す） |

@@ -1,4 +1,4 @@
-# cp terraform.tfvars.example terraform.tfvars（第17章で値を入れる）。
+# cp terraform.tfvars.example terraform.tfvars（初回の apply の前に値を入れる。docs/ci-cd.md）。
 # 秘密の値はここに書かない（Secrets Manager に入れる）。
 domain_name                = "app.flowdesk.example"
 alb_certificate_arn        = "arn:aws:acm:ap-northeast-1:111122223333:certificate/00000000-0000-0000-0000-000000000000"
@@ -6,3 +6,5 @@ cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111122223333:certificate/000
 bucket_suffix              = "111122223333"
 image_tag                  = "git-0000000"
 mail_from                  = "FlowDesk <no-reply@flowdesk.example>"
+github_repository          = "example-org/flowdesk"
+alarm_emails               = ["ops@flowdesk.example"]

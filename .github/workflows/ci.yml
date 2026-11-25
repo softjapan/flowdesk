@@ -1,0 +1,214 @@
+# CI（第17章、docs/ci-cd.md・docs/testing.md）。
+# - Pull Request と main への push で、すべてのジョブを回す。週 1 回の定期実行は
+#   依存の脆弱性と履歴の秘密情報（security）だけ
+# - アクションはコミットの SHA で固定する（タグは付け替えられる）。コメントは版
+# - GITHUB_TOKEN の権限は読み取りだけ。秘密（Secrets）は使わない
+#   （フォークからの Pull Request でも同じように動く）
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 0 * * 1" # 毎週月曜 09:00 JST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  check:
+    name: check（型・Lint・整形・単体・秘密情報・マイグレーション）
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  build:
+    name: build（DATABASE_URL なし）
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # 環境変数なしでビルドできること（第8章の回帰）。念のため外してから実行する
+      - run: env -u DATABASE_URL -u BETTER_AUTH_SECRET npm run build
+
+  test-db:
+    name: test:db（PostgreSQL）
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.7
+        env:
+          POSTGRES_USER: flowdesk
+          POSTGRES_PASSWORD: flowdesk
+          POSTGRES_DB: flowdesk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flowdesk -d flowdesk"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      # CI だけのサービスコンテナ（compose.yaml と同じローカル用の値）
+      TEST_DATABASE_URL: postgresql://flowdesk:flowdesk@localhost:5432/flowdesk_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:db
+
+  e2e:
+    name: test:e2e（Playwright）
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18.7
+        env:
+          POSTGRES_USER: flowdesk
+          POSTGRES_PASSWORD: flowdesk
+          POSTGRES_DB: flowdesk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flowdesk -d flowdesk"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      s3:
+        image: rustfs/rustfs:1.0.6
+        env:
+          RUSTFS_ACCESS_KEY: flowdesk
+          RUSTFS_SECRET_KEY: flowdesk-secret
+        ports:
+          - 9000:9000
+    env:
+      E2E_DATABASE_URL: postgresql://flowdesk:flowdesk@localhost:5432/flowdesk_e2e
+      S3_ENDPOINT: http://localhost:9000
+      AWS_REGION: ap-northeast-1
+      # RustFS（サービスコンテナ）の鍵。.env.example と同じローカル用の値で、AWS の鍵ではない
+      AWS_ACCESS_KEY_ID: flowdesk
+      AWS_SECRET_ACCESS_KEY: flowdesk-secret
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx --no-install playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: 失敗したらレポートと trace を残す
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  terraform:
+    name: terraform（fmt・validate・test。AWS に接続しない）
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive
+        working-directory: infra/terraform
+      # aws はモックのプロバイダー。init はプロバイダーを Terraform Registry から取るだけ
+      - name: envs/prod
+        working-directory: infra/terraform/envs/prod
+        run: |
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate
+          terraform test
+      - name: bootstrap（state 用のバケット）
+        working-directory: infra/terraform/bootstrap
+        run: |
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate
+          terraform test
+
+  migrations:
+    name: migrations（危険な操作・適用済みの書き換え）
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # 比べる元：PR はベースのブランチ、push は push の前のコミット
+      - name: npm run migrations:check -- --base
+        env:
+          BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: |
+          if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+            npm run migrations:check
+          else
+            npm run migrations:check -- --base "$BASE_REF"
+          fi
+
+  security:
+    name: security（npm audit・履歴の秘密情報）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # --history はすべてのコミットを見る
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run audit:check
+      - run: npm run secrets:scan -- --history

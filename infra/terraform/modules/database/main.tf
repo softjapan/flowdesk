@@ -67,7 +67,7 @@ resource "aws_db_instance" "this" {
   parameter_group_name   = aws_db_parameter_group.this.name
   publicly_accessible    = false
   multi_az               = var.multi_az
-  ca_cert_identifier     = "rds-ca-rsa2048-g1"
+  ca_cert_identifier     = var.ca_cert_identifier
 
   backup_retention_period   = var.backup_retention_days
   backup_window             = "18:00-18:30" # JST 03:00-03:30

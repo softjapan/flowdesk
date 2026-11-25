@@ -1,6 +1,6 @@
 # 技術スタックと固定バージョン
 
-確認日：2026-11-23（第14〜16章の追記は 2026-11-25）。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
+確認日：2026-11-23（第14〜17章の追記は 2026-11-25）。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
 `package.json` では本番依存を完全一致（`-E`）で固定し、更新は章タグを切り直すときにまとめて行う。
 
 ## 実行環境
@@ -15,6 +15,8 @@
 | Mailpit | 1.34.0 | ローカル開発用。SMTP を受けて Web 画面（8025）に表示 |
 | Terraform | 1.17.2 | 第16〜17章。`infra/terraform/`（`docs/architecture.md`）。`required_version = "~> 1.17.2"` |
 | 本番のイメージの土台 | `node:24.13.0-bookworm-slim` | 第16章。`Dockerfile`（web・worker・migrate）。非 root（`node`、UID 1000） |
+| actionlint | 1.7.12 | 第17章。ワークフローの構文の確認（`docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12`）。依存には入れない |
+| GitHub Actions のランナー | `ubuntu-24.04`（CI）、`ubuntu-24.04-arm`（デプロイ） | 第17章。デプロイは Graviton と同じ ARM64 で、QEMU なしでビルドする |
 
 ## インフラ（Terraform のプロバイダー、第16章）
 
@@ -24,6 +26,22 @@
 |--------------|-----------|----------------|
 | hashicorp/aws | 6.74.0 | 2026-11-23 公開の最新（Terraform Registry で確認）。書き込み専用の属性（`password_wo`・`secret_string_wo`）を使う |
 | hashicorp/random | 3.9.1 | 第16章で追加。DB のパスワードと `BETTER_AUTH_SECRET` を `ephemeral "random_password"` で作り、state に残さない。CloudFront → ALB のヘッダーの値（`random_password`、state に残る）。手元で値を作るだけで、どこにも接続しない |
+
+## CI/CD（GitHub Actions のアクション、第17章）
+
+`.github/workflows/*.yml` でコミットの SHA に固定する（`uses:` の行の末尾のコメントに版）。2026-11-25 に各リポジトリのタグ（`git ls-remote --tags`）の最新の版から SHA を引き、その SHA の `action.yml` で入力を確かめた。**npm の依存は追加していない。**
+
+| アクション | 版 | SHA | 使う場所 |
+|------------|----|-----|----------|
+| actions/checkout | v7.0.1 | `3d3c42e5aac5ba805825da76410c181273ba90b1` | すべて |
+| actions/setup-node | v7.1.0 | `949feb2413d6458794dcd2491c4babbbce0c15c1` | ci・deploy（`.nvmrc` の版） |
+| actions/upload-artifact | v7.0.2 | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | ci（E2E の失敗時のレポート） |
+| hashicorp/setup-terraform | v4.0.1 | `dfe3c3f87815947d99a8997f908cb6525fc44e9e` | ci（Terraform 1.17.2、wrapper なし） |
+| aws-actions/configure-aws-credentials | v6.3.0 | `e1253824e5c10ff9df46874f81ed3ec929e19cfd` | deploy（OIDC） |
+| aws-actions/amazon-ecr-login | v2.2.0 | `7290e214a610b32bc0eef81748948b6d466a8783` | deploy |
+| docker/setup-buildx-action | v4.4.1 | `f87e5991a6d7451dcb8d9637bfbc97413f497069` | deploy |
+| docker/build-push-action | v7.4.0 | `c3c9e263c25d99ce0380d002d59b67737d91b0dc` | deploy |
+| anthropics/claude-code-action | v1.0.290 | `4411a9e9b0283becf4b924f7bce360fd7756c78c` | claude-review（モデルは `claude-sonnet-5-5`） |
 
 ## アプリケーション
 
@@ -108,3 +126,10 @@
 48. **`mock_provider "aws"` でも、プロバイダーの値の検証（ARN の形など）は動く。** モックが作るでたらめな文字列を ARN の属性に渡すと `is an invalid ARN: arn: invalid prefix` で失敗するので、`mock_resource` の `defaults` で形の正しい ARN を決める（IAM ロール・ALB・ターゲットグループ・リスナー）（第16章）
 49. **Server Actions は `Origin` とホスト（`x-forwarded-host` か `host`）を比べる**（`next/dist/server/app-render/action-handler.js`）。CloudFront は `x-forwarded-host` を付けないので、オリジンへの Host を ALB の名前に書き換えるとすべての Server Action が失敗する。CloudFront は AllViewer で Host を渡し、ALB の証明書にアプリのドメインを含める（第16章、`docs/architecture.md`）
 50. **AWS の料金ページ（例：Fargate）は単価を JavaScript で表示するので、東京の値を文面から読めない。** 公開の Price List（`https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<コード>/current/ap-northeast-1/index.json`、認証不要）の `terms.OnDemand` と `products` を突き合わせて確かめた。EC2 のファイル（NAT Gateway を含む）は 445MB あるので、保存せずに流しながら該当の行だけを拾った（第16章）
+51. **Prisma 7.10 の CLI（`prisma migrate deploy`・`status`）は、`pg` の書き方の `sslmode=verify-full&sslrootcert=<CA>` を黙って無視し、サーバー証明書を検証せずに接続する。** 手元の TLS 必須の PostgreSQL で、別の CA を指定しても `migrate status` が通った。CLI の書き方は `sslmode=require&sslcert=<CA>&sslaccept=strict`（`sslcert` はクライアント証明書ではなく、サーバーを確かめる CA）。しかも `sslcert` は**ファイルの最初の証明書だけ**を使い、RDS の地域のバンドル（RSA4096・ECC384・RSA2048 の順）をそのまま渡すと RSA2048 の RDS に接続できない。`pg` は複数の CA のファイルでも、ホスト名の違いでも正しく検証・拒否する。CA は 1 つだけのファイル（`docker/rds-ca/`）にし、`prisma7.config.ts` が CLI の書き方に直す（`prisma/cli-database-url.ts`、第17章）。macOS のホストの Prisma（Security.framework）は、自分で作った CA を `The certificate was not trusted` で拒否するので、確認は本番と同じ Linux（migrate のイメージ）で行った
+52. **Prisma 7.10 の `migrate deploy` はマイグレーションのファイルをトランザクションで包まない。** `CREATE INDEX CONCURRENTLY` を 1 つのファイルに 2 つ書いても適用できた。その代わり、途中で失敗すると前半だけが適用された状態で止まる（`docs/migrations.md` の 3、第17章）
+53. **Terraform 1.17.2 の `mock_provider` では、`aws_cloudfront_cache_policy`・`aws_cloudfront_origin_request_policy` のデータソースの `id` が常に `null` になる。** `id` が入力にもなる属性のため、`mock_data` の `defaults` も `override_data` の `values` も効かない（最小の構成で確かめた）。マネージドポリシーの ID は公開の値を書き、名前で引いた ID と plan のときに照合する precondition にした（`null` のときは飛ばす。第17章）
+54. **GitHub の OIDC のトークンの `sub` は、ジョブが `environment` を指定すると `repo:<owner>/<repo>:environment:<名前>` になり、ブランチが入らない。** IAM の信頼ポリシーをこの値の完全一致にし、main に絞るのは environment の「デプロイできるブランチ」で行う（`docs/ci-cd.md`、第17章）
+55. **`anthropics/claude-code-action`（v1.0.290）は、PR のとき `.claude/`・`CLAUDE.md`・`AGENTS.md` などをベースのブランチから戻してから Claude を動かし、フォークの PR は既定（`allow_fork_prs: false`）で飛ばす**（アクションの `docs/security.md`）。`github_token` を渡せば GitHub App は要らず、`id-token: write` も要らない（第17章）
+56. **ECS のサーキットブレーカーが前の版に戻すと、`aws ecs wait services-stable` は戻した後の状態で成功しうる**（戻した後もサービスは「安定」になるため。本物の AWS では確かめていない）。デプロイの成否は、新しいタスク定義のデプロイの `rolloutState`（`COMPLETED`・`FAILED`）で判断する（`scripts/deploy/ecs-deploy.mts`、第17章）
+57. **第17章では npm の依存を追加していない。** デプロイの手順は aws CLI を呼ぶ自前のスクリプト（Node 24 の型の除去で `node scripts/deploy/ecs-deploy.mts` として動く。`npm ci` が要らない）、マイグレーションの検査も tsx で動く自前のスクリプト。Worker のバンドル（esbuild を直接の依存にする）は提案に留めた（`docs/architecture.md` の 9）

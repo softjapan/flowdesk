@@ -1,4 +1,4 @@
-# 本番の設定の主要な値を、AWS に接続せずに確かめる（第16章）。
+# 本番の設定の主要な値を、AWS に接続せずに確かめる（第16〜17章）。
 #   cd infra/terraform/envs/prod && terraform init -backend=false && terraform test
 #
 # - aws はモックのプロバイダー（API を呼ばず、計算される属性に仮の値を入れる）。
@@ -48,6 +48,30 @@ mock_provider "aws" {
   mock_data "aws_ec2_managed_prefix_list" {
     defaults = { id = "pl-58a04531" }
   }
+  mock_resource "aws_iam_openid_connect_provider" {
+    defaults = { arn = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com" }
+  }
+  mock_resource "aws_ecs_cluster" {
+    defaults = { arn = "arn:aws:ecs:ap-northeast-1:111122223333:cluster/flowdesk-prod" }
+  }
+  mock_resource "aws_ecs_task_definition" {
+    defaults = {
+      arn                  = "arn:aws:ecs:ap-northeast-1:111122223333:task-definition/flowdesk-prod-mock:1"
+      arn_without_revision = "arn:aws:ecs:ap-northeast-1:111122223333:task-definition/flowdesk-prod-mock"
+    }
+  }
+  mock_resource "aws_sns_topic" {
+    defaults = { arn = "arn:aws:sns:ap-northeast-1:111122223333:flowdesk-prod-alarms" }
+  }
+}
+
+# CloudFront 用の WAF（us-east-1）
+mock_provider "aws" {
+  alias = "us_east_1"
+
+  mock_resource "aws_wafv2_web_acl" {
+    defaults = { arn = "arn:aws:wafv2:us-east-1:111122223333:global/webacl/flowdesk-prod/00000000-0000-0000-0000-000000000000" }
+  }
 }
 
 variables {
@@ -57,6 +81,7 @@ variables {
   bucket_suffix              = "111122223333"
   image_tag                  = "git-abc1234"
   mail_from                  = "FlowDesk <no-reply@flowdesk.test>"
+  github_repository          = "example-org/flowdesk"
 }
 
 # ==== 本番の構成全体（つなぎ方） ===============================================
@@ -157,6 +182,54 @@ run "production_wiring" {
   assert {
     condition     = module.network.nat_gateway_count == 1
     error_message = "既定では NAT Gateway は 1 つ（費用を抑える）。"
+  }
+
+  # 第17章：RDS のサーバー証明書を、イメージに入れた CA で検証する
+  assert {
+    condition     = output.database_tls_query == "sslmode=verify-full&sslrootcert=/etc/ssl/rds/rds-ca-rsa2048-g1.crt"
+    error_message = "DATABASE_URL は verify-full で、RDS に指定した CA（イメージの /etc/ssl/rds/）を使う。"
+  }
+
+  assert {
+    condition     = output.web_acl_arn == "arn:aws:wafv2:us-east-1:111122223333:global/webacl/flowdesk-prod/00000000-0000-0000-0000-000000000000"
+    error_message = "CloudFront に WAF を付ける。"
+  }
+
+  assert {
+    condition     = output.github_deploy_subject == "repo:example-org/flowdesk:environment:production"
+    error_message = "デプロイのロールは、このリポジトリの production の environment だけが引き受けられる。"
+  }
+
+  assert {
+    condition = (
+      output.github_deploy_variables.MIGRATE_SECURITY_GROUPS == module.ecs.security_group_ids["migrate"] &&
+      output.github_deploy_variables.ECS_CLUSTER == "flowdesk-prod" &&
+      output.github_deploy_variables.NAME_PREFIX == "flowdesk-prod"
+    )
+    error_message = "デプロイのワークフローに渡す値（migrate の SG・クラスター・名前）。"
+  }
+}
+
+run "rejects_ca_not_in_image" {
+  command = plan
+
+  variables {
+    db_ca_cert_identifier = "rds-ca-ecc384-g1"
+  }
+
+  expect_failures = [var.db_ca_cert_identifier]
+}
+
+run "waf_can_be_disabled" {
+  command = plan
+
+  variables {
+    enable_waf = false
+  }
+
+  assert {
+    condition     = length(module.waf) == 0
+    error_message = "enable_waf = false なら WAF を作らない。"
   }
 }
 
@@ -629,10 +702,26 @@ run "cloudfront_forwards_to_alb_over_https" {
 
   assert {
     condition = (
+      data.aws_cloudfront_cache_policy.caching_disabled.name == "Managed-CachingDisabled" &&
+      data.aws_cloudfront_cache_policy.caching_optimized.name == "Managed-CachingOptimized" &&
+      data.aws_cloudfront_origin_request_policy.all_viewer.name == "Managed-AllViewer"
+    )
+    error_message = "マネージドポリシーを名前でも引き、plan のときに ID と照合する（precondition）。"
+  }
+
+  assert {
+    condition = (
       one(aws_cloudfront_distribution.this.default_cache_behavior).cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" &&
       one(aws_cloudfront_distribution.this.default_cache_behavior).origin_request_policy_id == "216adef6-5c7f-47e4-b989-5492eafa07d3"
     )
     error_message = "画面と API はキャッシュせず（CachingDisabled）、Host・Cookie・RSC のヘッダーを渡す（AllViewer）。"
+  }
+
+  assert {
+    condition = (
+      one([for b in aws_cloudfront_distribution.this.ordered_cache_behavior : b if b.path_pattern == "/_next/static/*"]).cache_policy_id == "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    )
+    error_message = "/_next/static/* だけをキャッシュする（CachingOptimized）。"
   }
 
   assert {
@@ -649,4 +738,280 @@ run "cloudfront_forwards_to_alb_over_https" {
     condition     = contains(aws_cloudfront_origin_request_policy.host_only.headers_config[0].headers[0].items, "host")
     error_message = "静的ファイルにも Host を渡す（ALB の証明書がアプリのドメインのため）。"
   }
+}
+
+# ==== 第17章 ===================================================================
+
+run "deploy_role_trusts_only_this_repository_and_environment" {
+  command = apply
+
+  module {
+    source = "../../modules/deploy"
+  }
+
+  variables {
+    name                               = "flowdesk-test"
+    github_repository                  = "example-org/flowdesk"
+    ecr_repository_arns                = ["arn:aws:ecr:ap-northeast-1:111122223333:repository/flowdesk-test/web"]
+    cluster_arn                        = "arn:aws:ecs:ap-northeast-1:111122223333:cluster/flowdesk-test"
+    service_arns                       = ["arn:aws:ecs:ap-northeast-1:111122223333:service/flowdesk-test/web"]
+    migrate_task_definition_family_arn = "arn:aws:ecs:ap-northeast-1:111122223333:task-definition/flowdesk-test-migrate"
+    pass_role_arns                     = ["arn:aws:iam::111122223333:role/flowdesk-test-ecs-execution"]
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role.deploy.assume_role_policy).Statement[0].Action == "sts:AssumeRoleWithWebIdentity" &&
+      jsondecode(aws_iam_role.deploy.assume_role_policy).Statement[0].Principal.Federated == "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
+    )
+    error_message = "GitHub の OIDC のトークンでだけ引き受けられる。"
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role.deploy.assume_role_policy).Statement[0].Condition.StringEquals == {
+        "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+        "token.actions.githubusercontent.com:sub" = "repo:example-org/flowdesk:environment:production"
+      }
+    )
+    error_message = "sub はこのリポジトリの production の environment だけ（完全一致）、aud は sts.amazonaws.com。"
+  }
+
+  assert {
+    condition     = keys(jsondecode(aws_iam_role.deploy.assume_role_policy).Statement[0].Condition) == ["StringEquals"]
+    error_message = "StringLike（ワイルドカード）を使わない。"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement :
+      s.Resource != "*" || contains(["EcrLogin", "TaskDefinitions"], s.Sid)
+    ])
+    error_message = "Resource = * はリソースを指定できない操作（ECR のログイン・タスク定義の読み取りと登録）だけ。"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : [
+        for a in s.Action : !strcontains(a, "*")
+      ]
+    ]))
+    error_message = "操作に * を使わない。"
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s if s.Sid == "PassTaskRoles"]).Condition.StringEquals["iam:PassedToService"] == "ecs-tasks.amazonaws.com"
+    )
+    error_message = "PassRole は ECS のタスクに渡すときだけ。"
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s if s.Sid == "RunMigrate"]).Resource == "arn:aws:ecs:ap-northeast-1:111122223333:task-definition/flowdesk-test-migrate:*" &&
+      one([for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s if s.Sid == "RunMigrate"]).Condition.ArnEquals["ecs:cluster"] == "arn:aws:ecs:ap-northeast-1:111122223333:cluster/flowdesk-test"
+    )
+    error_message = "run-task できるのは、このクラスターでの migrate だけ。"
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(aws_iam_role_policy.deploy.policy).Statement : s if s.Sid == "WatchMigrate"]).Resource == "arn:aws:ecs:ap-northeast-1:111122223333:task/flowdesk-test/*"
+    error_message = "DescribeTasks はこのクラスターのタスクだけ。"
+  }
+
+  assert {
+    condition     = aws_iam_role.deploy.max_session_duration == 3600
+    error_message = "一時的な認証情報は 1 時間まで。"
+  }
+}
+
+run "deploy_role_rejects_wildcard_repository" {
+  command = plan
+
+  module {
+    source = "../../modules/deploy"
+  }
+
+  variables {
+    name                               = "flowdesk-test"
+    github_repository                  = "example-org/*"
+    github_environment                 = "*"
+    ecr_repository_arns                = ["arn:aws:ecr:ap-northeast-1:111122223333:repository/flowdesk-test/web"]
+    cluster_arn                        = "arn:aws:ecs:ap-northeast-1:111122223333:cluster/flowdesk-test"
+    service_arns                       = ["arn:aws:ecs:ap-northeast-1:111122223333:service/flowdesk-test/web"]
+    migrate_task_definition_family_arn = "arn:aws:ecs:ap-northeast-1:111122223333:task-definition/flowdesk-test-migrate"
+    pass_role_arns                     = ["*"]
+  }
+
+  expect_failures = [var.github_repository, var.github_environment, var.pass_role_arns]
+}
+
+run "deploy_role_can_use_existing_oidc_provider" {
+  command = apply
+
+  module {
+    source = "../../modules/deploy"
+  }
+
+  variables {
+    name                               = "flowdesk-test"
+    github_repository                  = "example-org/flowdesk"
+    oidc_provider_arn                  = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
+    ecr_repository_arns                = ["arn:aws:ecr:ap-northeast-1:111122223333:repository/flowdesk-test/web"]
+    cluster_arn                        = "arn:aws:ecs:ap-northeast-1:111122223333:cluster/flowdesk-test"
+    service_arns                       = ["arn:aws:ecs:ap-northeast-1:111122223333:service/flowdesk-test/web"]
+    migrate_task_definition_family_arn = "arn:aws:ecs:ap-northeast-1:111122223333:task-definition/flowdesk-test-migrate"
+    pass_role_arns                     = ["arn:aws:iam::111122223333:role/flowdesk-test-ecs-execution"]
+  }
+
+  assert {
+    condition     = length(aws_iam_openid_connect_provider.github) == 0
+    error_message = "既存の OIDC プロバイダーを渡したら作らない（アカウントに 1 つだけ）。"
+  }
+}
+
+run "ecs_services_leave_task_definition_to_deploy" {
+  command = apply
+
+  module {
+    source = "../../modules/ecs"
+  }
+
+  variables {
+    name                  = "flowdesk-test"
+    region                = "ap-northeast-1"
+    vpc_id                = "vpc-0123456789abcdef0"
+    vpc_cidr_block        = "10.20.0.0/16"
+    app_subnet_ids        = ["subnet-app-a", "subnet-app-c"]
+    alb_security_group_id = "sg-alb"
+    target_group_arn      = "arn:aws:elasticloadbalancing:ap-northeast-1:111122223333:targetgroup/mock/0123456789abcdef"
+    s3_bucket_arn         = "arn:aws:s3:::flowdesk-test-uploads"
+    queue_arn             = "arn:aws:sqs:ap-northeast-1:111122223333:flowdesk-jobs"
+    image_tag             = "git-abc1234"
+    environment           = { NODE_ENV = "production" }
+    secret_arns = {
+      database-url       = "arn:aws:secretsmanager:ap-northeast-1:111122223333:secret:flowdesk/test/database-url-AbCdEf"
+      better-auth-secret = "arn:aws:secretsmanager:ap-northeast-1:111122223333:secret:flowdesk/test/better-auth-secret-AbCdEf"
+      stripe             = "arn:aws:secretsmanager:ap-northeast-1:111122223333:secret:flowdesk/test/stripe-AbCdEf"
+      smtp               = "arn:aws:secretsmanager:ap-northeast-1:111122223333:secret:flowdesk/test/smtp-AbCdEf"
+    }
+  }
+
+  assert {
+    condition     = toset(keys(output.task_role_arns)) == toset(["execution", "web", "worker"])
+    error_message = "デプロイが PassRole するのは、実行ロールと web・worker のタスクロール。"
+  }
+
+  assert {
+    condition     = toset(keys(output.task_definition_family_arns)) == toset(["web", "worker", "migrate"])
+    error_message = "デプロイはタスク定義の 3 つのファミリーを使う。"
+  }
+}
+
+run "alarms_notify_sns" {
+  command = apply
+
+  module {
+    source = "../../modules/monitoring"
+  }
+
+  variables {
+    name                    = "flowdesk-test"
+    alarm_emails            = ["ops@flowdesk.test"]
+    alb_arn_suffix          = "app/mock/0123456789abcdef"
+    target_group_arn_suffix = "targetgroup/mock/0123456789abcdef"
+    db_instance_identifier  = "flowdesk-test"
+  }
+
+  assert {
+    condition = toset(keys(aws_cloudwatch_metric_alarm.this)) == toset([
+      "alb-target-5xx", "alb-elb-5xx", "alb-unhealthy-targets", "rds-cpu", "rds-free-storage", "rds-connections",
+    ])
+    error_message = "ALB の 5xx・ターゲットの異常、RDS の CPU・空き容量・接続数を見る。"
+  }
+
+  assert {
+    condition = alltrue([
+      for a in aws_cloudwatch_metric_alarm.this :
+      a.alarm_actions == toset([aws_sns_topic.alarms.arn]) && a.ok_actions == toset([aws_sns_topic.alarms.arn])
+    ])
+    error_message = "どのアラームも SNS に通知する（鳴ったときと戻ったとき）。"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.this["rds-free-storage"].comparison_operator == "LessThanThreshold"
+    error_message = "空き容量は下回ったら鳴らす。"
+  }
+
+  assert {
+    condition     = aws_sns_topic.alarms.kms_master_key_id == "alias/aws/sns"
+    error_message = "SNS のトピックを暗号化する。"
+  }
+}
+
+run "waf_limits_webhook_body" {
+  command = apply
+
+  module {
+    source = "../../modules/waf"
+  }
+
+  providers = {
+    aws = aws.us_east_1
+  }
+
+  variables {
+    name = "flowdesk-test"
+  }
+
+  assert {
+    condition     = aws_wafv2_web_acl.this.scope == "CLOUDFRONT"
+    error_message = "CloudFront 用（us-east-1）の Web ACL。"
+  }
+
+  assert {
+    condition = (
+      one([for r in aws_wafv2_web_acl.this.rule : r if r.name == "webhook-body-too-large"]).priority == 0 &&
+      length(one([for r in aws_wafv2_web_acl.this.rule : r if r.name == "webhook-body-too-large"]).action[0].block) == 1
+    )
+    error_message = "Webhook の本文の上限のルールは最初に評価し、超えたら止める。"
+  }
+
+  assert {
+    condition = (
+      one(one(one(one([for r in aws_wafv2_web_acl.this.rule : r if r.name == "webhook-body-too-large"]).statement).and_statement).statement[0].byte_match_statement).search_string == "/api/webhooks/" &&
+      one(one(one(one([for r in aws_wafv2_web_acl.this.rule : r if r.name == "webhook-body-too-large"]).statement).and_statement).statement[1].size_constraint_statement).size == 65536 &&
+      one(one(one(one(one([for r in aws_wafv2_web_acl.this.rule : r if r.name == "webhook-body-too-large"]).statement).and_statement).statement[1].size_constraint_statement).field_to_match).body[0].oversize_handling == "MATCH"
+    )
+    error_message = "/api/webhooks/ の本文が 64KB を超えたら（WAF が見られる大きさを超えたものも）一致させる。"
+  }
+
+  assert {
+    condition     = one(one(one(aws_wafv2_web_acl.this.association_config).request_body).cloudfront).default_size_inspection_limit == "KB_64"
+    error_message = "本文を 64KB まで見る。"
+  }
+
+  assert {
+    condition     = length(one([for r in aws_wafv2_web_acl.this.rule : r if r.name == "aws-common"]).override_action[0].count) == 1
+    error_message = "共通のルールは、既定では数えるだけ（誤検知を確かめてから止める）。"
+  }
+}
+
+run "waf_rejects_body_limit_beyond_inspection" {
+  command = plan
+
+  module {
+    source = "../../modules/waf"
+  }
+
+  providers = {
+    aws = aws.us_east_1
+  }
+
+  variables {
+    name                   = "flowdesk-test"
+    webhook_max_body_bytes = 100000
+  }
+
+  expect_failures = [var.webhook_max_body_bytes]
 }

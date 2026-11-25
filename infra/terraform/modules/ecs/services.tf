@@ -1,5 +1,12 @@
 # ECS のサービス（web・worker）。migrate はサービスにせず、デプロイのたびに
 # run-task する（第17章の CI/CD）。
+#
+# デプロイ（.github/workflows/deploy.yml → scripts/deploy/ecs-deploy.mts）は、
+# Terraform が作ったタスク定義の最新の版をもとに、イメージのタグだけを
+# 差し替えた版を登録し、サービスをそれに切り替える。Terraform がサービスを
+# 自分の版（var.image_tag）に戻さないよう、task_definition の差分は見ない。
+# Terraform で環境変数などを変えたときは、デプロイを実行して反映する
+# （docs/ci-cd.md）
 resource "aws_ecs_service" "web" {
   name                              = "web"
   cluster                           = aws_ecs_cluster.this.id
@@ -31,8 +38,8 @@ resource "aws_ecs_service" "web" {
   }
 
   lifecycle {
-    # 台数はオートスケーリングが決める
-    ignore_changes = [desired_count]
+    # 台数はオートスケーリングが、版はデプロイが決める
+    ignore_changes = [desired_count, task_definition]
   }
 }
 
@@ -80,5 +87,10 @@ resource "aws_ecs_service" "worker" {
     subnets          = var.app_subnet_ids
     security_groups  = [aws_security_group.this["worker"].id]
     assign_public_ip = false
+  }
+
+  lifecycle {
+    # 版はデプロイが決める（上の web と同じ）
+    ignore_changes = [task_definition]
   }
 }

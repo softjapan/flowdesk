@@ -75,15 +75,22 @@ npm run worker              # 別のターミナルで。メール送信・CSV �
 
 ## 本番（AWS、第16〜17章）
 
-構成・シークレット・月額費用の目安は [`docs/architecture.md`](docs/architecture.md)。第16章では AWS に接続せず、手元で次を確かめる。
+構成・シークレット・月額費用の目安は [`docs/architecture.md`](docs/architecture.md)、CI/CD（GitHub Actions・OIDC のデプロイ）と初回の手順は [`docs/ci-cd.md`](docs/ci-cd.md)、マイグレーションの流し方（expand と contract）は [`docs/migrations.md`](docs/migrations.md)。第16〜17章では AWS に接続せず、手元で次を確かめる。
 
 ```bash
 # 本番のイメージ（web・worker・migrate）を compose の DB・S3・SQS・メールと組み合わせて起動する
 docker compose -f compose.yaml -f compose.prod.yaml up -d --build --wait   # http://localhost:3300
 
 # Terraform（AWS の API は呼ばない。terraform plan・apply はしない）
-cd infra/terraform && terraform fmt -check -recursive
-cd envs/prod && terraform init -backend=false && terraform validate && terraform test
+(cd infra/terraform && terraform fmt -check -recursive)
+(cd infra/terraform/envs/prod && terraform init -backend=false && terraform validate && terraform test)
+(cd infra/terraform/bootstrap && terraform init && terraform validate && terraform test)
+
+# ワークフローの構文（GitHub では実行しない）
+docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+
+# マイグレーションの危険な操作（npm run check にも含む）
+npm run migrations:check
 ```
 
 ## Stripe（テストモード）

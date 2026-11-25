@@ -86,7 +86,53 @@ variable "better_auth_secret_version" {
 }
 
 variable "alarm_topic_arns" {
-  description = "アラームの通知先（SNS。第17章で作る）"
+  description = "アラームの通知先に足す SNS（modules/monitoring の通知先には必ず送る）"
   type        = list(string)
   default     = []
+}
+
+variable "db_ca_cert_identifier" {
+  description = "RDS のサーバー証明書の CA。docker/rds-ca/<これ>.crt がイメージに入っている必要がある"
+  type        = string
+  default     = "rds-ca-rsa2048-g1"
+
+  validation {
+    condition     = fileexists("${path.root}/../../../../docker/rds-ca/${var.db_ca_cert_identifier}.crt")
+    error_message = "docker/rds-ca/<db_ca_cert_identifier>.crt がない。イメージに入れていない CA では接続できない（docker/rds-ca/README.md）。"
+  }
+}
+
+variable "enable_waf" {
+  description = "CloudFront に AWS WAF を付ける（月 10.60 USD ほど。docs/architecture.md の 7）"
+  type        = bool
+  default     = true
+}
+
+variable "waf_common_rules_enforce" {
+  description = "AWSManagedRulesCommonRuleSet で止める（既定は数えるだけ。サンプルを見てから true にする）"
+  type        = bool
+  default     = false
+}
+
+variable "alarm_emails" {
+  description = "アラームを受け取るメールアドレス"
+  type        = list(string)
+  default     = []
+}
+
+variable "github_repository" {
+  description = "デプロイを許す GitHub のリポジトリ（owner/repo）"
+  type        = string
+}
+
+variable "github_environment" {
+  description = "デプロイのジョブの environment（.github/workflows/deploy.yml）"
+  type        = string
+  default     = "production"
+}
+
+variable "github_oidc_provider_arn" {
+  description = "GitHub の OIDC プロバイダーがアカウントに既にあれば、その ARN（null なら作る）"
+  type        = string
+  default     = null
 }

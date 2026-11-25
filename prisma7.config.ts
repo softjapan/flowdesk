@@ -2,6 +2,7 @@
 // （prisma.config.ts も後方互換で読まれる）。
 import { existsSync } from "node:fs";
 import { defineConfig } from "prisma/config";
+import { toPrismaCliUrl } from "./prisma/cli-database-url";
 
 // Next.js と同じく .env.local → .env の順に読む。loadEnvFile は既に
 // 設定済みの変数を上書きしないので、コマンドで渡した DATABASE_URL が勝つ。
@@ -17,7 +18,9 @@ export default defineConfig({
     seed: "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.ts",
   },
   datasource: {
-    // prisma generate は接続しないので、未設定でも失敗させない
-    url: process.env.DATABASE_URL ?? "",
+    // prisma generate は接続しないので、未設定でも失敗させない。
+    // 本番の verify-full は CLI の書き方に直す（直さないと検証せずに
+    // 接続する。prisma/cli-database-url.ts）
+    url: toPrismaCliUrl(process.env.DATABASE_URL ?? ""),
   },
 });

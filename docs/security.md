@@ -1,6 +1,6 @@
 # セキュリティの方針と監査の記録
 
-確認日：2026-11-25（第14章）。認可の判断は `docs/authz-matrix.md`、テストの分担は `docs/testing.md` を正とする。
+確認日：2026-11-25（第14章。第17章で 1 の 9・7 を追記）。認可の判断は `docs/authz-matrix.md`、テストの分担は `docs/testing.md` を正とする。
 
 ## 1. AI によるレビュー（第14章）の結果
 
@@ -16,7 +16,7 @@
 | 6 | Worker が payload の `organizationId` を信用している | 誤検知 | SQS のメッセージは `jobId` だけで、payload はサーバーが DB に作ったもの。外から書き換える経路がない | 見送り |
 | 7 | Worker・Webhook がエラーをそのままログに出す | 低 | ログは内部（CloudWatch）だけ。応答は固定の文言 | 見送り（第15章でログの方針を決めるときに扱う） |
 | 8 | CSV の数式対策が電話番号の先頭の `+` にも `'` を付ける | 誤検知 | セキュリティ上は正しい挙動（データの品質の話） | 見送り |
-| 9 | Webhook の本文の大きさに上限がない | 低 | 署名の検証の順序（生の本文で検証）は正しい | 第16章で確かめたところ、ALB には本文の大きさの上限の設定がない。第17章で WAF のサイズ制約のルールで扱う（`docs/architecture.md` の 9） |
+| 9 | Webhook の本文の大きさに上限がない | 低 | 署名の検証の順序（生の本文で検証）は正しい | 第16章で確かめたところ、ALB には本文の大きさの上限の設定がない。第17章で WAF（`infra/terraform/modules/waf`）に、`/api/webhooks/` の本文が 64KB を超えたら止めるルールを足した（`docs/architecture.md` の 2） |
 
 ①は、Service 層の認可（表のすべての行）、`organizationId` での絞り込み、他の組織の ID の 404、`disabledPaths` について「問題なし」とした。②は、Zod による入力の検証、オープンリダイレクト（`safeCallbackUrl`）、Webhook の署名の検証について「問題なし」とした。
 
@@ -84,3 +84,14 @@ frame-ancestors 'none'; upgrade-insecure-requests（公開 URL が https のと�
 ## 6. Claude Code の安全装置（第2・14章）
 
 `.claude/settings.json` の PreToolUse フック（`.claude/hooks/guard-bash.sh`）は、**Subagent の Bash の呼び出しにも効く**。2026-11-25 に、general-purpose の Subagent に `git push --force --dry-run origin HEAD` を一度だけ実行させ、`Blocked: force push は禁止。必要なら人間が実行する` で止まることを確かめた（コマンドは実行されていない）。
+
+## 7. CI/CD の安全装置（第17章）
+
+詳細は `docs/ci-cd.md`。
+
+- **AWS の長期のアクセスキーを作らない。** デプロイは GitHub の OIDC のトークンで IAM ロールを引き受ける。信頼ポリシーは `repo:<owner>/<repo>:environment:production` の完全一致と `aud = sts.amazonaws.com`。main に絞るのは GitHub の environment の「デプロイできるブランチ」（人が設定する）
+- デプロイのロールは ECR への push・migrate の run-task・web と worker の更新・タスク定義のロールの PassRole だけ。state・Secrets Manager の値・IAM の変更はできない
+- ワークフローの権限は既定で `contents: read`（または `{}`）。アクションはコミットの SHA で固定する。`persist-credentials: false`。`pull_request_target` は使わない
+- Claude Code のレビュー（`claude-review.yml`）は、フォークの PR と Dependabot の PR では動かさない。API キーは GitHub の Secrets（`ANTHROPIC_API_KEY`）から渡し、ツールは読み取りとコメントだけ。アクションは `.claude/` をベースのブランチから戻すので、PR でレビューの観点（`security-reviewer.md`）を書き換えても効かない
+- マイグレーションの危険な操作（列の削除・改名・型の変更・NOT NULL など）は `npm run migrations:check` が止める（`docs/migrations.md`）
+- RDS への接続はサーバー証明書を検証する（`verify-full`）。Prisma の CLI は `verify-full` を黙って無視するので、CLI の書き方に直して渡す（`docs/architecture.md` の 4）

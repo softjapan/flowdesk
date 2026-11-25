@@ -1,0 +1,141 @@
+# 本番へのデプロイ（第17章、docs/ci-cd.md）。
+# 1. main への push の CI（ci.yml）が成功したら、そのコミットをデプロイする
+#    （workflow_run）。手動の再実行は workflow_dispatch（main だけ）
+# 2. GitHub の OIDC で AWS の IAM ロールを引き受ける（長期のアクセスキーは使わない）。
+#    ロールの信頼ポリシーは、このリポジトリの production の environment だけを許す
+#    （infra/terraform/modules/deploy）。environment の「デプロイできるブランチ」は
+#    GitHub の設定で main だけにする
+# 3. linux/arm64 のイメージ（web・worker・migrate）をビルドして ECR に push する。
+#    タグは git-<コミット>。ECR のタグは上書きできないので、あれば作り直さない
+# 4. migrate を run-task で実行し、成功したら web・worker を更新する
+#    （scripts/deploy/ecs-deploy.mts）
+# 値（ロールの ARN・クラスターなど）は秘密ではないので environment の変数（vars）に
+# 置く。terraform output github_deploy_variables の値を入れる
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# デプロイは 1 つずつ。途中で止めると migrate とサービスの更新がずれるので取り消さない
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    # Graviton（ARM64）のタスクと同じアーキテクチャで、QEMU なしでビルドする
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # OIDC のトークン（AWS のロールを引き受ける）
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      REPOSITORY_PREFIX: ${{ vars.ECR_REPOSITORY_PREFIX }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SHA }}
+          persist-credentials: false
+
+      - name: イメージのタグ
+        id: tag
+        run: |
+          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "コミットの SHA が不正：$SHA" >&2
+            exit 1
+          fi
+          echo "tag=git-${SHA:0:12}" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: deploy-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2.2.0
+
+      - name: push 済みのイメージを調べる（タグは上書きできない）
+        id: exists
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          for target in web worker migrate; do
+            if aws ecr describe-images --repository-name "$REPOSITORY_PREFIX/$target" \
+                --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+              echo "$target=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$target=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # 環境変数・秘密なしでビルドする（第8章。秘密は ECS が起動時に渡す）
+      - name: web
+        if: steps.exists.outputs.web != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: web
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORY_PREFIX }}/web:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      - name: worker
+        if: steps.exists.outputs.worker != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: worker
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORY_PREFIX }}/worker:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,scope=worker,mode=max
+
+      - name: migrate
+        if: steps.exists.outputs.migrate != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: migrate
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORY_PREFIX }}/migrate:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,scope=migrate,mode=max
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      # migrate → 成功したら web・worker。依存は使わない（Node 24 の型の除去と aws CLI）
+      - name: migrate を実行してから web・worker を更新する
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          NAME_PREFIX: ${{ vars.NAME_PREFIX }}
+          MIGRATE_SUBNETS: ${{ vars.MIGRATE_SUBNETS }}
+          MIGRATE_SECURITY_GROUPS: ${{ vars.MIGRATE_SECURITY_GROUPS }}
+        run: node scripts/deploy/ecs-deploy.mts

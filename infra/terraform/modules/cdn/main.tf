@@ -18,11 +18,26 @@ terraform {
 
 locals {
   origin_id = "alb"
-  # AWS のマネージドポリシー（ID は AWS 全体で共通）
-  # （docs/architecture.md の「要確認」に挙げた。適用前に名前と ID を照合する）
-  cache_policy_caching_disabled    = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
-  cache_policy_caching_optimized   = "658327ea-f89d-4fab-a63d-7e88639e58f6"
-  origin_request_policy_all_viewer = "216adef6-5c7f-47e4-b989-5492eafa07d3"
+  # AWS のマネージドポリシー（ID は AWS 全体で共通、AWS のドキュメントに載っている値）。
+  # 名前で引いた ID と一致することを、下の precondition が plan のときに確かめる
+  # （第17章。モックのテストではデータソースの id が null になり確かめられない）
+  managed_policy_ids = {
+    caching_disabled  = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+    caching_optimized = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    all_viewer        = "216adef6-5c7f-47e4-b989-5492eafa07d3"
+  }
+}
+
+data "aws_cloudfront_cache_policy" "caching_disabled" {
+  name = "Managed-CachingDisabled"
+}
+
+data "aws_cloudfront_cache_policy" "caching_optimized" {
+  name = "Managed-CachingOptimized"
+}
+
+data "aws_cloudfront_origin_request_policy" "all_viewer" {
+  name = "Managed-AllViewer"
 }
 
 # 静的ファイル用：Host だけを渡す（Cookie・クエリは渡さない）
@@ -78,8 +93,8 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
-    cache_policy_id          = local.cache_policy_caching_disabled
-    origin_request_policy_id = local.origin_request_policy_all_viewer
+    cache_policy_id          = local.managed_policy_ids.caching_disabled
+    origin_request_policy_id = local.managed_policy_ids.all_viewer
   }
 
   ordered_cache_behavior {
@@ -89,7 +104,7 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods          = ["GET", "HEAD"]
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
-    cache_policy_id          = local.cache_policy_caching_optimized
+    cache_policy_id          = local.managed_policy_ids.caching_optimized
     origin_request_policy_id = aws_cloudfront_origin_request_policy.host_only.id
   }
 
@@ -102,6 +117,20 @@ resource "aws_cloudfront_distribution" "this" {
   restrictions {
     geo_restriction {
       restriction_type = "none"
+    }
+  }
+
+  lifecycle {
+    # モックではデータソースの id が null になるので、null のときは飛ばす
+    precondition {
+      condition = alltrue([
+        for k, found in {
+          caching_disabled  = data.aws_cloudfront_cache_policy.caching_disabled.id
+          caching_optimized = data.aws_cloudfront_cache_policy.caching_optimized.id
+          all_viewer        = data.aws_cloudfront_origin_request_policy.all_viewer.id
+        } : found == null || found == local.managed_policy_ids[k]
+      ])
+      error_message = "マネージドポリシーの ID が、名前で引いた ID と違う。local.managed_policy_ids を直す。"
     }
   }
 }

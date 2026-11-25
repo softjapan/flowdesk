@@ -74,3 +74,9 @@ variable "password_wo_version" {
   description = "パスワードを変えるときに 1 つ上げる"
   type        = number
 }
+
+variable "ca_cert_identifier" {
+  description = "RDS のサーバー証明書の CA。イメージに同じ CA（docker/rds-ca/<これ>.crt）を入れ、DATABASE_URL の verify-full で検証する"
+  type        = string
+  default     = "rds-ca-rsa2048-g1"
+}
