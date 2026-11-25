@@ -14,9 +14,3 @@ variable "max_receive_count" {
   type        = number
   default     = 3
 }
-
-variable "alarm_actions" {
-  description = "アラームの通知先（SNS トピックの ARN）"
-  type        = list(string)
-  default     = []
-}

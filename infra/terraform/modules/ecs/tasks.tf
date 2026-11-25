@@ -4,7 +4,72 @@
 # - コンテナは非 root（UID 1000、Dockerfile の node ユーザー）。ルートは
 #   読み取り専用にし、書き込む場所（/tmp、Next.js のキャッシュ）だけボリュームにする
 # - Graviton（ARM64）。イメージは linux/arm64 でビルドする
+# - 第18章：ログは 1 行の JSON（src/server/logger.ts）。awslogs は non-blocking
+#   にし、CloudWatch Logs が遅れてもアプリを止めない（バッファーがあふれた分は
+#   捨てる）。トレースは web・worker のタスクの中の ADOT Collector（サイドカー）に
+#   OTLP で送り、Collector が X-Ray の OTLP エンドポイントへ SigV4 で送る
 locals {
+  # web・worker の共通の追加の環境変数（第18章）
+  telemetry_env = merge(
+    {
+      APP_VERSION            = var.image_tag
+      DEPLOYMENT_ENVIRONMENT = var.deployment_environment
+      LOG_FORMAT             = "json"
+    },
+    var.tracing.enabled ? {
+      OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4318"
+      OTEL_TRACES_SAMPLER_ARG     = tostring(var.tracing.sampling_ratio)
+    } : {},
+  )
+
+  # ADOT Collector の設定（AOT_CONFIG_CONTENT で YAML を渡す）。
+  # 受けるのはタスクの中（127.0.0.1）だけ。X-Ray の OTLP エンドポイントは
+  # Transaction Search を有効にしてから使う（docs/observability.md の 3。本物の AWS では未確認）
+  collector_config = yamlencode({
+    extensions = {
+      sigv4auth = { region = var.region, service = "xray" }
+    }
+    receivers = {
+      otlp = { protocols = { http = { endpoint = "127.0.0.1:4318" } } }
+    }
+    processors = {
+      batch = { timeout = "5s" }
+      # 2 GB のタスクでも Collector が使いすぎない上限
+      memory_limiter = { check_interval = "1s", limit_mib = 100 }
+    }
+    exporters = {
+      otlphttp = {
+        traces_endpoint = "https://xray.${var.region}.amazonaws.com/v1/traces"
+        auth            = { authenticator = "sigv4auth" }
+      }
+    }
+    service = {
+      extensions = ["sigv4auth"]
+      pipelines = {
+        traces = {
+          receivers  = ["otlp"]
+          processors = ["memory_limiter", "batch"]
+          exporters  = ["otlphttp"]
+        }
+      }
+    }
+  })
+
+  collector_container = {
+    name      = "otel-collector"
+    image     = var.tracing.collector_image
+    essential = false
+    user      = "10001:10001"
+
+    readonlyRootFilesystem = true
+    privileged             = false
+    linuxParameters        = { capabilities = { drop = ["ALL"] } }
+    environment            = [{ name = "AOT_CONFIG_CONTENT", value = local.collector_config }]
+    secrets                = []
+    mountPoints            = []
+    memoryReservation      = 64
+  }
+
   # JSON のシークレットは <ARN>:<キー>:: で 1 つの値を取り出す
   secret_refs = {
     DATABASE_URL          = var.secret_arns["database-url"]
@@ -20,9 +85,12 @@ locals {
     web = {
       cpu    = var.web_cpu
       memory = var.web_memory
-      environment = merge(var.environment, {
-        HOSTNAME = "0.0.0.0"
-        PORT     = tostring(var.web_port)
+      environment = merge(var.environment, local.telemetry_env, {
+        HOSTNAME          = "0.0.0.0"
+        PORT              = tostring(var.web_port)
+        OTEL_SERVICE_NAME = "flowdesk-web"
+        # アクセスログの行を EMF にし、RequestDuration・Request5xx のメトリクスにする
+        LOG_EMF_NAMESPACE = var.metrics_namespace
       })
       secrets      = ["DATABASE_URL", "BETTER_AUTH_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_PRO"]
       volumes      = { tmp = "/tmp", next-cache = "/app/.next/cache" }
@@ -37,12 +105,14 @@ locals {
       }
     }
     worker = {
-      cpu         = var.worker_cpu
-      memory      = var.worker_memory
-      environment = var.environment
-      secrets     = ["DATABASE_URL", "SMTP_USER", "SMTP_PASSWORD"]
-      volumes     = { tmp = "/tmp" }
-      port        = null
+      cpu    = var.worker_cpu
+      memory = var.worker_memory
+      environment = merge(var.environment, local.telemetry_env, {
+        OTEL_SERVICE_NAME = "flowdesk-worker"
+      })
+      secrets = ["DATABASE_URL", "SMTP_USER", "SMTP_PASSWORD"]
+      volumes = { tmp = "/tmp" }
+      port    = null
       # SIGTERM の後、処理中のメッセージを終えるまで待つ（Fargate の上限は 120 秒）
       stop_timeout = 120
       health_check = null
@@ -50,7 +120,7 @@ locals {
     migrate = {
       cpu          = 256
       memory       = 512
-      environment  = { NODE_ENV = "production" }
+      environment  = { NODE_ENV = "production", APP_VERSION = var.image_tag }
       secrets      = ["DATABASE_URL"]
       volumes      = { tmp = "/tmp", npm-home = "/home/node" }
       port         = null
@@ -59,8 +129,11 @@ locals {
     }
   }
 
+  # トレースを送るタスク（migrate は短命なので送らない）
+  traced_tasks = var.tracing.enabled ? toset(["web", "worker"]) : toset([])
+
   container_definitions = {
-    for name, t in local.tasks : name => [merge(
+    for name, t in local.tasks : name => concat([merge(
       {
         name      = name
         image     = "${aws_ecr_repository.this[name].repository_url}:${var.image_tag}"
@@ -86,6 +159,9 @@ locals {
             awslogs-group         = aws_cloudwatch_log_group.this[name].name
             awslogs-region        = var.region
             awslogs-stream-prefix = name
+            # CloudWatch Logs が遅れても stdout の書き込みで止まらない（第18章）
+            mode            = "non-blocking"
+            max-buffer-size = "25m"
           }
         }
       },
@@ -95,7 +171,18 @@ locals {
       t.health_check == null ? {} : {
         healthCheck = t.health_check
       },
-    )]
+      ), ], contains(local.traced_tasks, name) ? [merge(local.collector_container, {
+        logConfiguration = {
+          logDriver = "awslogs"
+          options = {
+            awslogs-group         = aws_cloudwatch_log_group.this[name].name
+            awslogs-region        = var.region
+            awslogs-stream-prefix = "${name}-otel"
+            mode                  = "non-blocking"
+            max-buffer-size       = "4m"
+          }
+        }
+    })] : [])
   }
 }
 

@@ -4,6 +4,8 @@
 #   s3     → S3（RustFS は S3 互換 API を持つ）
 #   sqs    → SQS（ElasticMQ は SQS 互換 API を持つ）
 #   mail   → SES（Mailpit は SMTP で受けて Web 画面に表示する）
+#   jaeger → X-Ray（第18章。OTLP でトレースを受けて Web 画面に表示する。
+#            本番は ECS のタスクの ADOT Collector が X-Ray へ送る）
 services:
   db:
     image: postgres:18.7
@@ -43,6 +45,12 @@ services:
     ports:
       - "1025:1025" # SMTP
       - "8025:8025" # Web 画面
+
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0
+    ports:
+      - "16686:16686" # Web 画面
+      - "4318:4318" # OTLP/HTTP（OTEL_EXPORTER_OTLP_ENDPOINT）
 
 volumes:
   db-data:

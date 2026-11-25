@@ -44,8 +44,13 @@ output "database_tls_query" {
   value       = local.database_tls_query
 }
 
-output "alarm_topic_arn" {
-  value = module.monitoring.topic_arn
+output "alarm_topic_arns" {
+  description = "critical・warning の SNS トピック（チャットなどの通知先を足すときに購読する）"
+  value       = module.monitoring.topic_arns
+}
+
+output "dashboard_name" {
+  value = module.monitoring.dashboard_name
 }
 
 output "web_acl_arn" {

@@ -68,6 +68,23 @@ resource "aws_iam_role" "task" {
   assume_role_policy = local.ecs_tasks_assume_role
 }
 
+# トレースを X-Ray に送る（ADOT Collector がタスクロールで SigV4 の署名をする）。
+# xray:PutTraceSegments はリソースを指定できない操作なので Resource = "*"
+resource "aws_iam_role_policy" "task_xray" {
+  for_each = var.tracing.enabled ? local.task_policies : {}
+  name     = "xray"
+  role     = aws_iam_role.task[each.key].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "XRay"
+      Effect   = "Allow"
+      Action   = ["xray:PutTraceSegments"]
+      Resource = "*"
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "task" {
   for_each = local.task_policies
   name     = "app"

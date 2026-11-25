@@ -108,7 +108,6 @@ module "queue" {
   # docker/elasticmq.conf と同じ名前
   name              = "flowdesk-jobs"
   max_receive_count = 3
-  alarm_actions     = concat([module.monitoring.topic_arn], var.alarm_topic_arns)
 }
 
 module "secrets" {
@@ -185,6 +184,13 @@ module "ecs" {
 
   # 秘密でない値だけ。S3_ENDPOINT・SQS_ENDPOINT・AWS の鍵は設定しない
   # （AWS の既定の接続先とタスクロールを使う。src/server/aws.ts）
+  deployment_environment = var.environment
+  tracing = {
+    enabled         = var.tracing_enabled
+    sampling_ratio  = var.trace_sampling_ratio
+    collector_image = "public.ecr.aws/aws-observability/aws-otel-collector:v0.51.0"
+  }
+
   environment = {
     NODE_ENV        = "production"
     BETTER_AUTH_URL = local.app_url
@@ -198,14 +204,29 @@ module "ecs" {
 }
 
 # ---- 監視 -------------------------------------------------------------------
+# 何が起きたら誰に知らせるか（critical・warning）は docs/observability.md の 4
 module "monitoring" {
   source = "../../modules/monitoring"
 
   name                    = local.name
-  alarm_emails            = var.alarm_emails
+  region                  = var.region
+  critical_alarm_emails   = var.critical_alarm_emails
+  warning_alarm_emails    = var.warning_alarm_emails
   alb_arn_suffix          = module.alb.arn_suffix
   target_group_arn_suffix = module.alb.target_group_arn_suffix
   db_instance_identifier  = module.database.identifier
+  cluster_name            = module.ecs.cluster_name
+  queue_name              = module.queue.queue_name
+  dlq_name                = module.queue.dlq_name
+  log_group_names         = module.ecs.log_group_names
+}
+
+# 第18章：DLQ のアラームを modules/queue から modules/monitoring に移した。
+# 第17章の構成を apply 済みの state でも、作り直さずに名前だけ移す
+# （名前も変わるので、apply ではアラームの置き換えになる）
+moved {
+  from = module.queue.aws_cloudwatch_metric_alarm.dlq_not_empty
+  to   = module.monitoring.aws_cloudwatch_metric_alarm.this["dlq-not-empty"]
 }
 
 # ---- デプロイ（GitHub Actions、docs/ci-cd.md） --------------------------------

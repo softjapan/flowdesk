@@ -5,6 +5,7 @@
 // 応答：署名が不正なら 400、処理済み・対象外も含めて受け取れたら 200。
 // 処理に失敗したら 500 を返し、Stripe に再送させる（イベント ID の記録も
 // 取り消されるので、再送で処理し直す）
+import { logger } from "@/server/logger";
 import { handleStripeEvent } from "@/server/services/billing";
 import { verifyStripeWebhook } from "@/server/stripe";
 
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
   );
   if (!verified.ok) {
     if (verified.reason === "not_configured") {
-      console.error("STRIPE_WEBHOOK_SECRET が設定されていない");
+      logger.error("STRIPE_WEBHOOK_SECRET が設定されていない");
       return Response.json(
         { error: "Webhook が設定されていません" },
         { status: 500, headers: noStore },
@@ -36,10 +37,10 @@ export async function POST(request: Request) {
       { headers: noStore },
     );
   } catch (error) {
-    console.error("Stripe のイベントを処理できない", {
+    logger.error("Stripe のイベントを処理できない", {
       eventId: verified.event.id,
-      type: verified.event.type,
-      error,
+      eventType: verified.event.type,
+      err: error,
     });
     return Response.json(
       { error: "処理に失敗しました" },

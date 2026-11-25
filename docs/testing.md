@@ -27,6 +27,9 @@
 | ブラウザから S3 への直接 PUT と完了の確認 | | △ | ○ | DB のテストは S3 を差し替え、E2E は RustFS に本当に送る（第11章の回帰） |
 | ログインとリダイレクト | | △ | ○ | Cookie・proxy・callbackUrl は E2E でしか確かめられない |
 | セキュリティヘッダー・CSRF・XSS | ○ | | ○ | CSP の組み立ては単体（`security-headers.test.ts`）、ブラウザが止めることは E2E（`e2e/security.spec.ts`、`docs/security.md`） |
+| ログに個人情報・秘密を出さない、トレースが SQS をまたいでつながる（第18章） | ○ | | | `logger.test.ts`（伏せる・ID や日時を壊さない）、`telemetry/telemetry.test.ts`（メッセージ属性の traceparent で Worker のスパンが同じトレースの子になる、アクセスログ・EMF）。Next.js と Worker が Jaeger に 1 本のトレースを送ることは手で確かめた（`docs/observability.md` の 3） |
+| 障害の後の再実行（第18章） | | ○ | | `jobs.db.test.ts` の「障害の後の再実行」：DLQ を戻すだけでは送られず、`retryFailedJobs` で送られる |
+| アラームの通知先・閾値、RDS のバックアップ（第18章） | | | | `terraform test`（`infra/terraform/envs/prod/tests/prod.tftest.hcl`、モック）。復旧は `npm run drill:restore` の演習（`docs/runbooks/restore.md`） |
 
 E2E は遅く、壊れやすい。**Service で判定できることは DB のテストで確かめ、E2E には「画面とサーバーのつなぎ目」だけを残す**。たとえば Staff が店舗を作れないことは DB のテスト（`forbidden`）で確かめ、E2E では「Staff にはフォームが出ない」ことだけを見る。
 

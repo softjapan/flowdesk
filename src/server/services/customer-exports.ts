@@ -25,13 +25,14 @@ import {
 import type { OrgContext } from "@/server/services/org-context";
 import { fail, ok, type Result } from "@/server/services/result";
 import { presignGet } from "@/server/storage";
+import { traceService } from "./traced";
 
 export type CustomerExportJobPayload = {
   organizationId: string;
   exportId: string;
 };
 
-export async function requestCustomerExport(
+async function requestCustomerExportImpl(
   ctx: OrgContext,
   dispatch: Dispatch = dispatchJobs,
 ): Promise<Result<{ id: string }>> {
@@ -138,3 +139,8 @@ export async function getCustomerExportUrl(
   });
   return ok({ url });
 }
+
+export const requestCustomerExport = traceService(
+  "customerExports.request",
+  requestCustomerExportImpl,
+);

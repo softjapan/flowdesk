@@ -14,6 +14,7 @@ import { nextCookies } from "better-auth/next-js";
 import { organization } from "better-auth/plugins/organization";
 import { ac, roles } from "@/server/access-control";
 import { appBaseUrl } from "@/server/app-url";
+import { logger } from "@/server/logger";
 import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
@@ -84,7 +85,9 @@ export function createAuth() {
             organizationId: null,
           },
         ).catch((error: unknown) => {
-          console.error("パスワード再設定メールの依頼に失敗", error);
+          logger.error("パスワード再設定メールの依頼に失敗", {
+            err: error,
+          });
         });
       },
     },

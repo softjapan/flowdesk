@@ -1,7 +1,8 @@
 # SQS（ジョブのキュー、第11章）。docker/elasticmq.conf と同じ名前・設定にする。
 # - 3 回受信して消されなかったメッセージは DLQ へ移る（maxReceiveCount = 3。
 #   Worker は 3 回目の失敗でメッセージを消さずに置く、docs/tech-stack.md の 26）
-# - DLQ にメッセージが入ったらアラームを鳴らす
+# - DLQ・キューの滞留のアラームは modules/monitoring に置く（第18章。
+#   誰に知らせるかを 1 か所で決める）
 terraform {
   required_providers {
     aws = { source = "hashicorp/aws" }
@@ -50,20 +51,4 @@ resource "aws_sqs_queue_policy" "this" {
       Condition = { Bool = { "aws:SecureTransport" = "false" } }
     }]
   })
-}
-
-resource "aws_cloudwatch_metric_alarm" "dlq_not_empty" {
-  alarm_name          = "${var.name}-dlq-not-empty"
-  alarm_description   = "ジョブが 3 回失敗して DLQ に入った。原因を直してから再投入する"
-  namespace           = "AWS/SQS"
-  metric_name         = "ApproximateNumberOfMessagesVisible"
-  dimensions          = { QueueName = aws_sqs_queue.dlq.name }
-  statistic           = "Maximum"
-  period              = 300
-  evaluation_periods  = 1
-  threshold           = 0
-  comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = var.alarm_actions
-  ok_actions          = var.alarm_actions
 }

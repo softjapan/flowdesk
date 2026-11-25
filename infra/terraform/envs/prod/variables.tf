@@ -85,12 +85,6 @@ variable "better_auth_secret_version" {
   default     = 1
 }
 
-variable "alarm_topic_arns" {
-  description = "アラームの通知先に足す SNS（modules/monitoring の通知先には必ず送る）"
-  type        = list(string)
-  default     = []
-}
-
 variable "db_ca_cert_identifier" {
   description = "RDS のサーバー証明書の CA。docker/rds-ca/<これ>.crt がイメージに入っている必要がある"
   type        = string
@@ -114,10 +108,28 @@ variable "waf_common_rules_enforce" {
   default     = false
 }
 
-variable "alarm_emails" {
-  description = "アラームを受け取るメールアドレス"
+variable "critical_alarm_emails" {
+  description = "critical のアラーム（すぐに対応する）を受け取るアドレス（当番の携帯に転送するもの）"
   type        = list(string)
   default     = []
+}
+
+variable "warning_alarm_emails" {
+  description = "warning のアラーム（次の営業日に対応する）を受け取るアドレス"
+  type        = list(string)
+  default     = []
+}
+
+variable "tracing_enabled" {
+  description = "web・worker のトレースを X-Ray に送る（ADOT Collector のサイドカー。docs/observability.md の 3）"
+  type        = bool
+  default     = true
+}
+
+variable "trace_sampling_ratio" {
+  description = "トレースを送る割合（0〜1）。ログと EMF のメトリクスはすべてのリクエストで出る"
+  type        = number
+  default     = 0.1
 }
 
 variable "github_repository" {

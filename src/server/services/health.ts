@@ -1,3 +1,4 @@
+import { logger } from "@/server/logger";
 import { pingDatabase } from "@/server/repositories/health";
 
 export type Health = { database: "ok" | "unavailable" };
@@ -11,7 +12,7 @@ export async function checkHealth(): Promise<Health> {
     await pingDatabase();
     return { database: "ok" };
   } catch (error) {
-    console.error("health: database unavailable", error);
+    logger.error("ヘルスチェック：DB に接続できない", { err: error });
     return { database: "unavailable" };
   }
 }

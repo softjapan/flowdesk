@@ -8,6 +8,7 @@
  * （src/server/services/jobs.ts の createMailJob・enqueueMail）。
  */
 import nodemailer, { type Transporter } from "nodemailer";
+import { SpanKind, withSpan } from "@/server/telemetry/tracing";
 
 export type Mail = {
   to: string;
@@ -49,9 +50,19 @@ export async function sendMail(
       "MAIL_FROM が設定されていない（.env.example を参照）",
     );
   }
-  await getTransport().sendMail({
-    from,
-    ...mail,
-    messageId: options.messageId,
-  });
+  // 宛先・件名・本文はスパンに載せない（個人情報。第18章）
+  await withSpan(
+    "smtp send",
+    {
+      "server.address": process.env.SMTP_HOST ?? "localhost",
+      "server.port": Number(process.env.SMTP_PORT ?? 1025),
+    },
+    () =>
+      getTransport().sendMail({
+        from,
+        ...mail,
+        messageId: options.messageId,
+      }),
+    { kind: SpanKind.CLIENT },
+  );
 }

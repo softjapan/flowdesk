@@ -44,8 +44,26 @@ variable "multi_az" {
 }
 
 variable "backup_retention_days" {
-  type    = number
-  default = 7
+  description = "自動バックアップの保持日数（PITR で戻せる期間）。RDS の上限は 35"
+  type        = number
+  default     = 7
+
+  validation {
+    condition     = var.backup_retention_days >= 7 && var.backup_retention_days <= 35
+    error_message = "バックアップは 7〜35 日保持する（0 にすると PITR ができない）。"
+  }
+}
+
+variable "backup_window" {
+  description = "自動バックアップの時間帯（UTC）。既定は JST 03:00-03:30"
+  type        = string
+  default     = "18:00-18:30"
+}
+
+variable "maintenance_window" {
+  description = "メンテナンスの時間帯（UTC）。バックアップの時間帯と重ねない"
+  type        = string
+  default     = "sun:19:00-sun:19:30"
 }
 
 variable "deletion_protection" {

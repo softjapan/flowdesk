@@ -106,7 +106,7 @@ sequenceDiagram
 6. **人が入れるシークレット**：`flowdesk/prod/stripe`・`flowdesk/prod/smtp`（`docs/architecture.md` の 4）。SES のドメインの検証・DKIM・サンドボックスの解除
 7. **DNS**：`domain_name` を `cloudfront_domain_name` に向ける
 8. **デプロイ**：`deploy.yml` を手動で実行する。以後は main への push の CI の成功で動く
-9. アラームのメール（`alarm_emails`）の購読の確認のリンクを押す
+9. アラームのメール（`critical_alarm_emails`・`warning_alarm_emails`、第18章）の購読の確認のリンクを押す
 
 ## 5. Claude Code のレビュー（claude-review.yml）
 

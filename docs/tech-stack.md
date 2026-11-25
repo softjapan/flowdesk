@@ -1,6 +1,6 @@
 # 技術スタックと固定バージョン
 
-確認日：2026-11-23（第14〜17章の追記は 2026-11-25）。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
+確認日：2026-11-23（第14〜18章の追記は 2026-11-25）。書籍のサンプルコードはすべて以下のバージョンで動作確認する。
 `package.json` では本番依存を完全一致（`-E`）で固定し、更新は章タグを切り直すときにまとめて行う。
 
 ## 実行環境
@@ -13,6 +13,8 @@
 | RustFS（S3 互換） | 1.0.6 | ローカル開発用。MinIO は Docker Hub からイメージが消えたため使わない（後述） |
 | ElasticMQ（SQS 互換） | 1.7.1 | ローカル開発用。`softwaremill/elasticmq-native` |
 | Mailpit | 1.34.0 | ローカル開発用。SMTP を受けて Web 画面（8025）に表示 |
+| Jaeger | 2.23.0 | 第18章。ローカル開発用のトレースの受け口（`jaegertracing/jaeger`、2026-11-05 の最新）。OTLP/HTTP（4318）で受けて Web 画面（16686）に表示。保存はメモリ（再起動で消える） |
+| ADOT Collector | v0.51.0 | 第18章。本番の ECS のタスクのサイドカー（`public.ecr.aws/aws-observability/aws-otel-collector`、2026-10-29 の最新）。X-Ray の OTLP エンドポイントへ送る。**本物の AWS では未確認** |
 | Terraform | 1.17.2 | 第16〜17章。`infra/terraform/`（`docs/architecture.md`）。`required_version = "~> 1.17.2"` |
 | 本番のイメージの土台 | `node:24.13.0-bookworm-slim` | 第16章。`Dockerfile`（web・worker・migrate）。非 root（`node`、UID 1000） |
 | actionlint | 1.7.12 | 第17章。ワークフローの構文の確認（`docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12`）。依存には入れない |
@@ -72,6 +74,11 @@
 | Lint | eslint / eslint-config-next | 9.39.5 / 16.4.6 | テンプレートは ESLint 9（`latest` は 10 だが合わせない） |
 | 整形 | prettier | 3.10.1 | A5 判の誌面に収めるため `printWidth: 70` |
 | 単体テスト | vitest | 5.1.1 | |
+| トレース | @opentelemetry/api | 1.10.0 | 第18章。スパンを作る API（`src/server/telemetry/tracing.ts`）。Next.js も自分のスパンをこの API で作る |
+| トレース | @opentelemetry/sdk-trace・context-async-hooks・core・resources | 3.1.1 | 第18章。SDK（TracerProvider・サンプリング・W3C Trace Context・AsyncLocalStorage）。同梱のドキュメントの例の `@opentelemetry/sdk-node` は使わない（gRPC・Prometheus・Zipkin の送信まで入る）。3.x では `sdk-trace-node`・`sdk-trace-base`（2.x）が `sdk-trace` にまとまった |
+| トレース | @opentelemetry/exporter-trace-otlp-http・instrumentation | 0.301.2 | 第18章。OTLP/HTTP（JSON）で送る・計装の登録 |
+| トレース | @opentelemetry/semantic-conventions | 1.45.0 | 第18章。`service.name` などの属性の名前 |
+| トレース | @prisma/instrumentation | 7.10.1 | 第18章。Prisma の操作・SQL のスパン（Prisma のトレースの仕組みを使うので、Next.js のバンドルでも動く）。依存の `@opentelemetry/instrumentation` は 0.207 系を自分の下に持つ |
 | E2E | @playwright/test | 1.65.1 | 第13章。dev。ブラウザは Chromium だけを使う（`npx playwright install chromium`、Chrome Headless Shell 159）。設定は `playwright.config.ts`、方針は `docs/testing.md` |
 
 ## 動作確認で分かったこと（本文で扱う）
@@ -133,3 +140,12 @@
 55. **`anthropics/claude-code-action`（v1.0.290）は、PR のとき `.claude/`・`CLAUDE.md`・`AGENTS.md` などをベースのブランチから戻してから Claude を動かし、フォークの PR は既定（`allow_fork_prs: false`）で飛ばす**（アクションの `docs/security.md`）。`github_token` を渡せば GitHub App は要らず、`id-token: write` も要らない（第17章）
 56. **ECS のサーキットブレーカーが前の版に戻すと、`aws ecs wait services-stable` は戻した後の状態で成功しうる**（戻した後もサービスは「安定」になるため。本物の AWS では確かめていない）。デプロイの成否は、新しいタスク定義のデプロイの `rolloutState`（`COMPLETED`・`FAILED`）で判断する（`scripts/deploy/ecs-deploy.mts`、第17章）
 57. **第17章では npm の依存を追加していない。** デプロイの手順は aws CLI を呼ぶ自前のスクリプト（Node 24 の型の除去で `node scripts/deploy/ecs-deploy.mts` として動く。`npm ci` が要らない）、マイグレーションの検査も tsx で動く自前のスクリプト。Worker のバンドル（esbuild を直接の依存にする）は提案に留めた（`docs/architecture.md` の 9）
+58. **OpenTelemetry JS の 3.x（2026-10）で、`@opentelemetry/sdk-trace-node`・`sdk-trace-base`（2.12 系で止まった）が `@opentelemetry/sdk-trace` にまとまった。** 2.x の `sdk-trace-node` は peer 依存が `@opentelemetry/api <1.10.0` で、最新の api 1.10.0 と合わない。`BatchSpanProcessor` は送信先を `{ exporter }` で受ける（2.x は引数にそのまま渡した）。`createAlwaysRecordSampler` で、送らないスパンも記録だけはできる（アクセスログ・EMF をすべてのリクエストで出すのに使った）（第18章）
+59. **Next.js 16.4.6 は 1 つのリクエストに `BaseServer.handleRequest` のスパンを 2 つ作る**（外側はルートなしで数 ms、内側は `next.route` ありで本文を流し終えるまで）。内側の長さが curl の本文を読み終えた時間と合うことを確かめ、p95 はこれで数える。ALB の `TargetResponseTime` は TTFB なので、Cache Components の画面の遅さが出ない（第18章、`docs/observability.md` の 3）
+60. **Worker の SIGTERM で SQS のロングポーリング（`ReceiveMessage`）を `AbortSignal` で中断すると、キュー（ElasticMQ 1.7.1）は中断された受信にメッセージを渡し、可視性タイムアウト（60 秒）の間届かなくなる。** 受信の回数も 1 つ増える（DLQ までの 3 回を使う）。トレースで `receiveCount: 2` なのに処理のスパンが 1 つのジョブから見つけた。停止の合図では受信を中断しないようにした。本物の SQS でも同じかは未確認（第18章）
+61. **SNS を AWS 管理のキー（`alias/aws/sns`）で暗号化すると、CloudWatch のアラームが通知できない**（キーのポリシーを変えられず、CloudWatch に使わせられない。AWS re:Post の説明。本物の AWS では未確認）。第17章の `modules/monitoring` はこの構成だった。カスタマー管理のキーにした（第18章）
+62. **Terraform 1.17.2 の `terraform test` で、`map(string)` の属性（`dimensions` など）とオブジェクトの書き方 `{ k = "v" }` を `==` で比べると、値が同じでも false になる**（型が map と object で違う）。`tomap({ ... })` で比べる。`metric_query` の `return_data` は指定しないと `null` で、`for ... if q.return_data` はエラーになる（第18章）
+63. **3 回失敗して DLQ に入ったジョブは、DLQ のメッセージを本体のキューに戻すだけでは再実行されない**（DB の job が `failed` で、`runJob` が「終わった」として捨てる）。`npm run jobs:retry`（`scripts/ops/retry-failed-jobs.ts`）で DB の job を `queued` に戻してから送る（第18章、`docs/runbooks/incident-ai.md` の 6）
+64. **手元の PostgreSQL 18.7（公式のイメージ）は、`local`・`127.0.0.1` からのレプリケーションの接続を trust で許す**ので、コンテナの中で `pg_basebackup`・`pg_receivewal` を動かせる（設定の変更は要らない）。`wal_level = replica` も既定。PITR の演習は `npm run drill:restore`（第18章、`docs/runbooks/restore.md`）
+65. **第18章で、ホストの 59324 番（compose.override.yaml の SQS）が「使用中」で ElasticMQ が起動しなかった**（`lsof` では使っているプロセスが見えなかった）。override で 59325 番にずらした（override はコミットしない）
+

@@ -19,6 +19,7 @@ import {
   customerListQuerySchema,
   type SearchParams,
 } from "@/server/validation/search-params";
+import { traceService } from "./traced";
 
 export const CUSTOMER_PAGE_SIZE = 10;
 
@@ -50,7 +51,7 @@ export type CustomerList = {
  * フリガナの順に 1 ページ分を返す。絞り込み・並べ替え・ページングは SQL で
  * 行う（searchCustomers）
  */
-export async function listCustomers(
+async function listCustomersImpl(
   ctx: OrgContext,
   params: SearchParams,
 ): Promise<CustomerList> {
@@ -208,3 +209,8 @@ export async function deleteCustomer(
     return ok({ id });
   });
 }
+
+export const listCustomers = traceService(
+  "customers.list",
+  listCustomersImpl,
+);

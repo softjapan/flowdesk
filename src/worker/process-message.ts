@@ -2,6 +2,7 @@
  * 受け取った 1 通のメッセージの扱い（Worker の本体から切り出してテストする）。
  * メッセージを消す・消さないの判断はここだけで行う。
  */
+import { logger } from "@/server/logger";
 import { parseJobMessage } from "@/server/queue";
 import {
   runJob,
@@ -29,7 +30,10 @@ export async function processMessage(
   const message = parseJobMessage(body);
   if (!message) {
     // 形式の違うメッセージは何度受けても処理できない
-    console.error("形式の違うメッセージを捨てる", body);
+    // 本文はそのまま出さない（何が入っているか分からない）。長さだけ残す
+    logger.error("形式の違うメッセージを捨てる", {
+      bodyLength: body?.length ?? 0,
+    });
     return { type: "delete" };
   }
   const outcome = await runJob(message.jobId, handlers, options);

@@ -14,6 +14,14 @@ import {
 } from "@aws-sdk/client-sqs";
 import { z } from "zod";
 import { getSqs, sqsQueueUrl } from "@/server/aws";
+import {
+  injectTraceContext,
+  SpanKind,
+  withSpan,
+} from "@/server/telemetry/tracing";
+
+/** トレースの文脈を載せるメッセージ属性（W3C Trace Context、第18章） */
+const TRACE_ATTRIBUTES = ["traceparent", "tracestate"];
 
 const jobMessageSchema = z.object({ jobId: z.string().min(1) });
 
@@ -29,13 +37,33 @@ export function parseJobMessage(body: string | undefined) {
   }
 }
 
+/**
+ * 送る。PRODUCER のスパンの文脈（traceparent）をメッセージ属性に入れ、
+ * Worker の処理が同じトレースの続きになるようにする
+ */
 export async function sendJobMessage(jobId: string): Promise<void> {
   const message: JobMessage = { jobId };
-  await getSqs().send(
-    new SendMessageCommand({
-      QueueUrl: sqsQueueUrl(),
-      MessageBody: JSON.stringify(message),
-    }),
+  await withSpan(
+    "send flowdesk-jobs",
+    {
+      "messaging.system": "aws_sqs",
+      "messaging.operation.type": "send",
+      "messaging.destination.name": "flowdesk-jobs",
+      "flowdesk.job.id": jobId,
+    },
+    async (span) => {
+      const result = await getSqs().send(
+        new SendMessageCommand({
+          QueueUrl: sqsQueueUrl(),
+          MessageBody: JSON.stringify(message),
+          MessageAttributes: injectTraceContext(),
+        }),
+      );
+      if (result.MessageId) {
+        span.setAttribute("messaging.message.id", result.MessageId);
+      }
+    },
+    { kind: SpanKind.PRODUCER },
   );
 }
 
@@ -43,6 +71,9 @@ export type ReceivedMessage = {
   body: string | undefined;
   receiptHandle: string;
   receiveCount: number;
+  messageId?: string;
+  /** 送った側のトレースの文脈（traceparent など。なければ空） */
+  traceCarrier: Record<string, string>;
 };
 
 /** ロングポーリングで受け取る（最大 20 秒待つ） */
@@ -55,6 +86,7 @@ export async function receiveJobMessages(
       MaxNumberOfMessages: 10,
       WaitTimeSeconds: 20,
       MessageSystemAttributeNames: ["ApproximateReceiveCount"],
+      MessageAttributeNames: TRACE_ATTRIBUTES,
     }),
     { abortSignal: signal },
   );
@@ -66,6 +98,13 @@ export async function receiveJobMessages(
             receiptHandle: m.ReceiptHandle,
             receiveCount: Number(
               m.Attributes?.ApproximateReceiveCount ?? 1,
+            ),
+            messageId: m.MessageId,
+            traceCarrier: Object.fromEntries(
+              TRACE_ATTRIBUTES.flatMap((k) => {
+                const v = m.MessageAttributes?.[k]?.StringValue;
+                return v ? [[k, v]] : [];
+              }),
             ),
           },
         ]

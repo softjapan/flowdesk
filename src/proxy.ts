@@ -8,6 +8,9 @@
  *
  * あわせて Content-Security-Policy を付ける（S3 のオリジンを実行時の
  * 環境変数から決めるため。src/lib/security-headers.ts）。
+ *
+ * 応答に x-request-id（このリクエストのトレース ID、第18章）を付ける。
+ * 問い合わせのときにこの値を聞けば、ログ（traceId）とトレースを引ける。
  */
 import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
@@ -17,12 +20,15 @@ import {
   requiresLogin,
 } from "@/lib/auth-paths";
 import { cspFromEnv } from "@/lib/security-headers";
+import { currentTraceId } from "@/server/telemetry/tracing";
 
 function withCsp(response: NextResponse): NextResponse {
   response.headers.set(
     "Content-Security-Policy",
     cspFromEnv(process.env, process.env.NODE_ENV === "development"),
   );
+  const traceId = currentTraceId();
+  if (traceId) response.headers.set("x-request-id", traceId);
   return response;
 }
 

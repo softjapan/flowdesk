@@ -12,6 +12,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getS3, s3Bucket } from "@/server/aws";
+import { SpanKind, withSpan } from "@/server/telemetry/tracing";
 
 export const PRESIGNED_URL_EXPIRES_IN_SECONDS = 5 * 60;
 
@@ -133,12 +134,19 @@ export async function putObject(input: {
   body: string | Uint8Array;
   contentType: string;
 }): Promise<void> {
-  await getS3().send(
-    new PutObjectCommand({
-      Bucket: s3Bucket(),
-      Key: input.key,
-      Body: input.body,
-      ContentType: input.contentType,
-    }),
+  // 鍵（orgs/<組織>/exports/<ID>.csv）は ID だけなのでスパンに載せてよい
+  await withSpan(
+    "s3 PutObject",
+    { "aws.s3.key": input.key, "rpc.method": "PutObject" },
+    () =>
+      getS3().send(
+        new PutObjectCommand({
+          Bucket: s3Bucket(),
+          Key: input.key,
+          Body: input.body,
+          ContentType: input.contentType,
+        }),
+      ),
+    { kind: SpanKind.CLIENT },
   );
 }

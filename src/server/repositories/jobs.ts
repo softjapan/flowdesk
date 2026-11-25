@@ -193,3 +193,51 @@ export async function listStrandedJobs(
     select: { id: true },
   });
 }
+
+/**
+ * 失敗した（failed）ジョブを、もう一度処理できる状態（queued・未送信）に戻す
+ * （第18章、障害の後の再実行。docs/runbooks/incident-ai.md）。
+ * sweepStrandedJobs と同じく運用の処理なので組織では絞らず、種類と失敗した
+ * 時刻で絞る。戻した ID を返す
+ */
+export async function requeueFailedJobs(
+  filter: { type: string; failedSince: Date; limit: number },
+  db: Db = getPrisma(),
+): Promise<string[]> {
+  const rows = await db.job.findMany({
+    where: {
+      status: "failed",
+      type: filter.type,
+      completedAt: { gte: filter.failedSince },
+    },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+    take: filter.limit,
+  });
+  const ids = rows.map((r) => r.id);
+  if (ids.length === 0) return [];
+  await db.job.updateMany({
+    where: { id: { in: ids }, status: "failed" },
+    data: {
+      status: "queued",
+      attempts: 0,
+      lockedUntil: null,
+      publishedAt: null,
+      completedAt: null,
+    },
+  });
+  return ids;
+}
+
+/** 失敗したジョブの数（種類ごと。再実行の前に確かめる） */
+export async function countFailedJobs(
+  failedSince: Date,
+  db: Db = getPrisma(),
+): Promise<{ type: string; count: number }[]> {
+  const rows = await db.job.groupBy({
+    by: ["type"],
+    where: { status: "failed", completedAt: { gte: failedSince } },
+    _count: { _all: true },
+  });
+  return rows.map((r) => ({ type: r.type, count: r._count._all }));
+}

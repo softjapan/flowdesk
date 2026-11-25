@@ -69,9 +69,15 @@ resource "aws_db_instance" "this" {
   multi_az               = var.multi_az
   ca_cert_identifier     = var.ca_cert_identifier
 
-  backup_retention_period   = var.backup_retention_days
-  backup_window             = "18:00-18:30" # JST 03:00-03:30
-  maintenance_window        = "sun:19:00-sun:19:30"
+  # 自動バックアップ（毎日のスナップショット＋トランザクションログ）。保持期間の
+  # 中なら 5 分ほど前までの任意の時刻に、別のインスタンスとして戻せる（PITR）。
+  # 復旧の手順は docs/runbooks/restore.md（第18章）
+  backup_retention_period = var.backup_retention_days
+  backup_window           = var.backup_window
+  maintenance_window      = var.maintenance_window
+  # インスタンスを消しても自動バックアップを保持期間まで残す（既定の true では
+  # 一緒に消え、誤って消したときに PITR で戻せない）
+  delete_automated_backups  = false
   copy_tags_to_snapshot     = true
   deletion_protection       = var.deletion_protection
   skip_final_snapshot       = false

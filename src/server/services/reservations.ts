@@ -47,6 +47,7 @@ import {
   calendarQuerySchema,
   type SearchParams,
 } from "@/server/validation/search-params";
+import { traceService } from "./traced";
 
 export type CalendarView = "day" | "week";
 
@@ -113,7 +114,7 @@ export function toReservationListItem(
   };
 }
 
-export async function getCalendar(
+async function getCalendarImpl(
   ctx: OrgContext,
   params: SearchParams,
   now: Date,
@@ -353,7 +354,7 @@ async function dispatchAfterCommit<T>(
   return result;
 }
 
-export async function createReservation(
+async function createReservationImpl(
   ctx: OrgContext,
   input: ReservationInput,
   dispatch: Dispatch = dispatchJobs,
@@ -447,7 +448,7 @@ function auditDiff(
  * 予約の変更（楽観ロック）。expectedVersion は画面で読んだときの version。
  * Staff は自分が担当の予約だけを、担当を自分のまま変更できる。
  */
-export async function updateReservation(
+async function updateReservationImpl(
   ctx: OrgContext,
   id: string,
   expectedVersion: number,
@@ -565,7 +566,7 @@ export async function updateReservation(
   return dispatchAfterCommit(result, jobIds, dispatch);
 }
 
-export async function cancelReservation(
+async function cancelReservationImpl(
   ctx: OrgContext,
   id: string,
   expectedVersion: number,
@@ -607,3 +608,23 @@ export async function cancelReservation(
     return ok({ id, version: result.reservation.version });
   });
 }
+
+export const getCalendar = traceService(
+  "reservations.calendar",
+  getCalendarImpl,
+);
+
+export const createReservation = traceService(
+  "reservations.create",
+  createReservationImpl,
+);
+
+export const updateReservation = traceService(
+  "reservations.update",
+  updateReservationImpl,
+);
+
+export const cancelReservation = traceService(
+  "reservations.cancel",
+  cancelReservationImpl,
+);

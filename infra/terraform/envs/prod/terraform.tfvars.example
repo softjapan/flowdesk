@@ -7,4 +7,5 @@ bucket_suffix              = "111122223333"
 image_tag                  = "git-0000000"
 mail_from                  = "FlowDesk <no-reply@flowdesk.example>"
 github_repository          = "example-org/flowdesk"
-alarm_emails               = ["ops@flowdesk.example"]
+critical_alarm_emails      = ["oncall@flowdesk.example"]
+warning_alarm_emails       = ["ops@flowdesk.example"]

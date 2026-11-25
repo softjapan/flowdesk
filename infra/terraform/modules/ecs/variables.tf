@@ -107,6 +107,46 @@ variable "worker_count" {
   default = 1
 }
 
+variable "deployment_environment" {
+  description = "ログ・トレースに付ける環境の名前（prod など）"
+  type        = string
+  default     = "prod"
+}
+
+variable "metrics_namespace" {
+  description = "アプリが EMF で出すメトリクスの名前空間（modules/monitoring と合わせる）"
+  type        = string
+  default     = "FlowDesk"
+}
+
+variable "tracing" {
+  description = <<-EOT
+    トレース（第18章、docs/observability.md）。enabled なら web・worker のタスクに
+    ADOT Collector を足し、X-Ray の OTLP エンドポイントへ送る。
+    sampling_ratio は送る割合（ログ・EMF はすべてのリクエストで出る）
+  EOT
+  type = object({
+    enabled         = bool
+    sampling_ratio  = number
+    collector_image = string
+  })
+  default = {
+    enabled         = true
+    sampling_ratio  = 0.1
+    collector_image = "public.ecr.aws/aws-observability/aws-otel-collector:v0.51.0"
+  }
+
+  validation {
+    condition     = var.tracing.sampling_ratio >= 0 && var.tracing.sampling_ratio <= 1
+    error_message = "sampling_ratio は 0〜1。"
+  }
+
+  validation {
+    condition     = !endswith(var.tracing.collector_image, ":latest") && strcontains(var.tracing.collector_image, ":")
+    error_message = "Collector のイメージは版を固定する（latest を使わない）。"
+  }
+}
+
 variable "log_retention_days" {
   type    = number
   default = 30

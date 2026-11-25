@@ -76,7 +76,8 @@ flowchart LR
 | SQS | ジョブのキュー（Outbox から送る、第11章） | `flowdesk-jobs`（可視性タイムアウト 60 秒）と `flowdesk-jobs-dlq`。`maxReceiveCount = 3`。SSE。DLQ に 1 件でも入ればアラーム（`modules/queue`）。名前と設定は `docker/elasticmq.conf` と同じ |
 | SES | メールの送信（招待・パスワード再設定・CSV の完了・前日リマインド） | Worker が SMTP（`email-smtp.ap-northeast-1.amazonaws.com:587`、STARTTLS）で送る。ドメインの検証・DKIM・サンドボックスの解除は第17章 |
 | Secrets Manager | 秘密の値 | 4 つ（§4）。ECS が起動時に読み、環境変数としてコンテナに渡す（`modules/secrets`） |
-| CloudWatch・SNS | ログ・メトリクス・アラーム | ロググループ `/ecs/flowdesk-prod/{web,worker,migrate}`（30 日）。RDS の `postgresql` ログ。アラームは SNS（`flowdesk-prod-alarms`、`alarm_emails` にメール）に送る：DLQ、ALB の 5xx（ターゲット・ALB）・異常なターゲット、RDS の CPU・空き容量・接続数（`modules/monitoring`、第17章）。`/api/health` の外形監視は未定 |
+| CloudWatch・SNS | ログ・メトリクス・アラーム | ロググループ `/ecs/flowdesk-prod/{web,worker,migrate}`（30 日、1 行の JSON）。RDS の `postgresql` ログ。アラームは重要度で 2 つの SNS（`flowdesk-prod-alarms-critical`・`-warning`、カスタマー管理の KMS のキーで暗号化）に送る：5xx の割合・p95（EMF）・キューの滞留・DLQ・タスクの異常停止・アプリのエラー・RDS。ダッシュボード `flowdesk-prod`（`modules/monitoring`、第17〜18章、`docs/observability.md`）。`/api/health` の外形監視は未定 |
+| X-Ray（第18章） | トレース | web・worker のタスクの ADOT Collector（サイドカー）が OTLP エンドポイントへ送る（10%）。CloudWatch の Transaction Search を有効にする必要がある（**未確認**、`docs/observability.md` の 3） |
 | ECR | イメージ | `flowdesk-prod/{web,worker,migrate}`。タグは上書きできない（IMMUTABLE）、push 時にスキャン、直近 30 個を残す。push は GitHub Actions（OIDC で引き受けるロール、`modules/deploy`、第17章） |
 
 ## 3. リクエストとジョブの流れ
@@ -222,6 +223,7 @@ migrate → web・worker の順に起動する。ECS と同じく、ルートを
 
 - RDS を Single-AZ にすると 79.25 → 39.26 で、合計は**約 173**。NAT Gateway を AZ ごと（2 つ）にすると ＋45.26（IPv4 も 1 つ増えて ＋3.65）
 - 大きいのは RDS（37%）、NAT Gateway（22%）、Fargate（21%）、ALB（11%）。台数・サイズが固定の費用がほとんどで、利用者の数ではあまり変わらない
+- 第18章で足したもの：KMS のキー 1.00、アラーム・カスタムメトリクス・アクセスログで約 3.30、合計 ＋4〜5 と X-Ray（Transaction Search）の費用（**要確認**、`docs/observability.md` の 5）
 - 第17章で足したもの：WAF（Web ACL 5.00 ＋ ルール 5 つ〈Webhook の本文・マネージド 3 つ・回数の上限〉5.00 ＋ 100 万リクエスト 0.60）で ＋10.60、アラームは DLQ と合わせて 7 個（上の計算は 5 個）で ＋0.20、SNS（メール）はほぼ 0。合計は**約 224**。WAF が本文を 16KB より多く（64KB まで）見る分の追加の料金は Price List で確かめていない（**要確認**）
 
 ### 含めていないもの（要確認）
@@ -298,6 +300,6 @@ cd ../../bootstrap && terraform init && terraform test   # 2 の run
 | DNS・証明書 | **手順**。ACM（ap-northeast-1 と us-east-1）の発行と DNS の検証、`domain_name` を CloudFront に向ける |
 | SES | **手順**。ドメインの検証・DKIM・サンドボックスの解除・SMTP の認証情報の作成と `flowdesk/prod/smtp` への登録 |
 | Webhook の本文の上限（`docs/security.md` の 1 の 9） | **済**（`modules/waf`、64KB）。Stripe の Webhook の本文の大きさの実際の分布は**残す**（本番のログで確かめ、上限を見直す） |
-| 監視 | **済**（`modules/monitoring`）。`/api/health` の外形監視は**残す**（Route 53 のヘルスチェックか Synthetics か、費用を見て決める） |
+| 監視 | **済**（`modules/monitoring`。第18章で重要度・閾値の根拠・SNS の暗号化のキーを見直した、`docs/observability.md`）。`/api/health` の外形監視は**残す**（Route 53 のヘルスチェックか Synthetics か、費用を見て決める） |
 | CI/CD | **済**（`docs/ci-cd.md`。ワークフローは作っただけで GitHub では未実行）。`linux/arm64` のビルド → ECR に push（Git のコミットをタグに）→ migrate を run-task → web・worker のタスク定義を更新 |
 | Worker のイメージの大きさ | **残す**。972MB。バンドルするには esbuild を直接の依存にする必要があり、`CLAUDE.md` の「表にない依存は先に提案して確認」に当たるので、第17章では入れていない（提案：esbuild で `src/worker/index.ts` を 1 ファイルにまとめ、`pg`・`nodemailer`・AWS SDK・Prisma の生成物だけを残す） |

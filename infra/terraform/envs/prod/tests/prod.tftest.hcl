@@ -63,6 +63,19 @@ mock_provider "aws" {
   mock_resource "aws_sns_topic" {
     defaults = { arn = "arn:aws:sns:ap-northeast-1:111122223333:flowdesk-prod-alarms" }
   }
+  # 第18章：監視（KMS・EventBridge → CloudWatch Logs）
+  mock_resource "aws_kms_key" {
+    defaults = {
+      arn    = "arn:aws:kms:ap-northeast-1:111122223333:key/00000000-0000-0000-0000-000000000000"
+      key_id = "00000000-0000-0000-0000-000000000000"
+    }
+  }
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = { arn = "arn:aws:logs:ap-northeast-1:111122223333:log-group:/mock" }
+  }
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "111122223333" }
+  }
 }
 
 # CloudFront 用の WAF（us-east-1）
@@ -174,9 +187,90 @@ run "production_wiring" {
 
   assert {
     condition = alltrue(flatten([
-      for name, defs in module.ecs.container_definitions : [for c in defs : c.user == "1000:1000"]
+      for name, defs in module.ecs.container_definitions : [
+        for c in defs : c.user == (c.name == "otel-collector" ? "10001:10001" : "1000:1000")
+      ]
     ]))
-    error_message = "どのコンテナも非 root（UID 1000、Dockerfile の node ユーザー）で動かす。"
+    error_message = "どのコンテナも非 root（アプリは UID 1000、Dockerfile の node ユーザー。Collector は 10001）で動かす。"
+  }
+
+  # ---- 第18章：ログとトレース --------------------------------------------------
+  assert {
+    condition = alltrue([
+      for name in ["web", "worker"] : alltrue([
+        for kv in [
+          "OTEL_SERVICE_NAME=flowdesk-${name}",
+          "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318",
+          "OTEL_TRACES_SAMPLER_ARG=0.1",
+          "LOG_FORMAT=json",
+          "APP_VERSION=git-abc1234",
+          "DEPLOYMENT_ENVIRONMENT=prod",
+        ] : contains([for e in module.ecs.container_definitions[name][0].environment : "${e.name}=${e.value}"], kv)
+      ])
+    ])
+    error_message = "web・worker は JSON のログを出し、タスクの中の Collector に 10% のトレースを送り、版と環境を付ける。"
+  }
+
+  assert {
+    condition = contains(
+      [for e in module.ecs.container_definitions["web"][0].environment : "${e.name}=${e.value}"],
+      "LOG_EMF_NAMESPACE=FlowDesk",
+    )
+    error_message = "web はアクセスログを EMF にし、RequestDuration（p95 のアラーム）を出す。"
+  }
+
+  assert {
+    condition = (
+      [for c in module.ecs.container_definitions["web"] : c.name] == ["web", "otel-collector"] &&
+      [for c in module.ecs.container_definitions["worker"] : c.name] == ["worker", "otel-collector"] &&
+      [for c in module.ecs.container_definitions["migrate"] : c.name] == ["migrate"]
+    )
+    error_message = "web・worker のタスクに ADOT Collector のサイドカーを足す（migrate には足さない）。"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for name, defs in module.ecs.container_definitions : [
+        for c in defs : c.name != "otel-collector" || (
+          !c.essential &&
+          !endswith(c.image, ":latest") &&
+          strcontains(one([for e in c.environment : e.value if e.name == "AOT_CONFIG_CONTENT"]), "https://xray.ap-northeast-1.amazonaws.com/v1/traces") &&
+          strcontains(one([for e in c.environment : e.value if e.name == "AOT_CONFIG_CONTENT"]), "127.0.0.1:4318")
+        )
+      ]
+    ]))
+    error_message = "Collector は止まってもアプリを止めず（essential = false）、版を固定し、タスクの中だけで受けて X-Ray の OTLP エンドポイントへ送る。"
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for name, defs in module.ecs.container_definitions : [
+        for c in defs : c.logConfiguration.options.mode == "non-blocking"
+      ]
+    ]))
+    error_message = "awslogs は non-blocking（CloudWatch Logs が遅れてもアプリの stdout を止めない）。"
+  }
+
+  # ---- 第18章：監視 -----------------------------------------------------------
+  assert {
+    condition     = toset(keys(output.alarm_topic_arns)) == toset(["critical", "warning"])
+    error_message = "通知先は critical（すぐ対応）と warning（次の営業日）の 2 つ。"
+  }
+
+  assert {
+    condition = alltrue([
+      for k in ["alb-5xx-ratio", "alb-unhealthy-targets", "app-p95-critical", "jobs-queue-stalled", "ecs-web-task-stops", "ecs-worker-task-stops", "rds-free-storage"] :
+      contains(keys(module.monitoring.alarm_severities), k) && module.monitoring.alarm_severities[k] == "critical"
+    ])
+    error_message = "利用者に影響があるもの・放っておくと止まるものは critical。"
+  }
+
+  assert {
+    condition = alltrue([
+      for k in ["app-p95-slo", "dlq-not-empty", "app-errors", "rds-cpu", "rds-connections", "rds-freeable-memory"] :
+      contains(keys(module.monitoring.alarm_severities), k) && module.monitoring.alarm_severities[k] == "warning"
+    ])
+    error_message = "遅い・失敗が溜まっているものは warning。"
   }
 
   assert {
@@ -348,6 +442,30 @@ run "rds_is_private" {
     error_message = "暗号化・削除保護・Multi-AZ・最後のスナップショット・7 日以上のバックアップを有効にする。"
   }
 
+  # 第18章：ポイントインタイムリカバリ（docs/runbooks/restore.md）
+  assert {
+    condition = (
+      aws_db_instance.this.backup_retention_period == 7 &&
+      aws_db_instance.this.delete_automated_backups == false &&
+      aws_db_instance.this.copy_tags_to_snapshot &&
+      aws_db_instance.this.final_snapshot_identifier == "flowdesk-test-final"
+    )
+    error_message = "自動バックアップを 7 日残し（PITR で戻せる期間）、インスタンスを消しても自動バックアップを消さない。"
+  }
+
+  assert {
+    condition = (
+      aws_db_instance.this.backup_window == "18:00-18:30" &&
+      aws_db_instance.this.maintenance_window == "sun:19:00-sun:19:30"
+    )
+    error_message = "バックアップは JST 03:00、メンテナンスはその後（日曜 JST 04:00）で重ねない。"
+  }
+
+  assert {
+    condition     = contains(aws_db_instance.this.enabled_cloudwatch_logs_exports, "postgresql")
+    error_message = "PostgreSQL のログ（遅いクエリ・エラー）を CloudWatch Logs に送る（障害の調査で使う）。"
+  }
+
   assert {
     condition     = contains([for p in aws_db_parameter_group.this.parameter : "${p.name}=${p.value}"], "rds.force_ssl=1")
     error_message = "TLS 以外の接続を拒否する（rds.force_ssl = 1）。"
@@ -456,8 +574,8 @@ run "sqs_dead_letter_queue" {
   }
 
   assert {
-    condition     = aws_cloudwatch_metric_alarm.dlq_not_empty.dimensions["QueueName"] == "flowdesk-jobs-dlq"
-    error_message = "DLQ にメッセージが入ったらアラームを鳴らす。"
+    condition     = output.dlq_name == "flowdesk-jobs-dlq"
+    error_message = "DLQ の名前を出力する（modules/monitoring のアラームが使う）。"
   }
 }
 
@@ -518,9 +636,22 @@ run "ecs_tasks" {
 
   assert {
     condition = alltrue(flatten([
-      for td in aws_ecs_task_definition.this : [for c in jsondecode(td.container_definitions) : c.user == "1000:1000"]
+      for td in aws_ecs_task_definition.this : [
+        for c in jsondecode(td.container_definitions) : c.user == (c.name == "otel-collector" ? "10001:10001" : "1000:1000")
+      ]
     ]))
-    error_message = "タスク定義のどのコンテナも非 root（UID 1000）で動かす。"
+    error_message = "タスク定義のどのコンテナも非 root（アプリは UID 1000、Collector は 10001）で動かす。"
+  }
+
+  assert {
+    condition = (
+      toset(keys(aws_iam_role_policy.task_xray)) == toset(["web", "worker"]) &&
+      alltrue([
+        for p in aws_iam_role_policy.task_xray :
+        jsondecode(p.policy).Statement[0].Action == ["xray:PutTraceSegments"]
+      ])
+    )
+    error_message = "トレースを送る web・worker のタスクロールに、X-Ray へ送る権限（PutTraceSegments だけ）を付ける。"
   }
 
   assert {
@@ -549,6 +680,14 @@ run "ecs_tasks" {
   assert {
     condition     = alltrue([for td in aws_ecs_task_definition.this : one(td.runtime_platform).cpu_architecture == "ARM64"])
     error_message = "Graviton（ARM64）で動かす。"
+  }
+
+  assert {
+    condition = alltrue([
+      for c in jsondecode(aws_ecs_task_definition.this["web"].container_definitions) :
+      c.logConfiguration.options.mode == "non-blocking" && c.logConfiguration.options["awslogs-group"] == aws_cloudwatch_log_group.this["web"].name
+    ])
+    error_message = "web のログ（アプリと Collector）は web のロググループに non-blocking で送る。"
   }
 
   assert {
@@ -908,7 +1047,7 @@ run "ecs_services_leave_task_definition_to_deploy" {
   }
 }
 
-run "alarms_notify_sns" {
+run "alarms_notify_by_severity" {
   command = apply
 
   module {
@@ -917,25 +1056,125 @@ run "alarms_notify_sns" {
 
   variables {
     name                    = "flowdesk-test"
-    alarm_emails            = ["ops@flowdesk.test"]
+    region                  = "ap-northeast-1"
+    critical_alarm_emails   = ["oncall@flowdesk.test"]
+    warning_alarm_emails    = ["ops@flowdesk.test", "dev@flowdesk.test"]
     alb_arn_suffix          = "app/mock/0123456789abcdef"
     target_group_arn_suffix = "targetgroup/mock/0123456789abcdef"
     db_instance_identifier  = "flowdesk-test"
+    cluster_name            = "flowdesk-test"
+    queue_name              = "flowdesk-jobs"
+    dlq_name                = "flowdesk-jobs-dlq"
+    log_group_names         = { web = "/ecs/flowdesk-test/web", worker = "/ecs/flowdesk-test/worker", migrate = "/ecs/flowdesk-test/migrate" }
   }
 
-  assert {
-    condition = toset(keys(aws_cloudwatch_metric_alarm.this)) == toset([
-      "alb-target-5xx", "alb-elb-5xx", "alb-unhealthy-targets", "rds-cpu", "rds-free-storage", "rds-connections",
-    ])
-    error_message = "ALB の 5xx・ターゲットの異常、RDS の CPU・空き容量・接続数を見る。"
+  # トピックごとに ARN を変え、どのアラームがどちらに送るかを確かめる
+  override_resource {
+    target = aws_sns_topic.alarms["critical"]
+    values = { arn = "arn:aws:sns:ap-northeast-1:111122223333:flowdesk-test-alarms-critical" }
+  }
+  override_resource {
+    target = aws_sns_topic.alarms["warning"]
+    values = { arn = "arn:aws:sns:ap-northeast-1:111122223333:flowdesk-test-alarms-warning" }
   }
 
   assert {
     condition = alltrue([
-      for a in aws_cloudwatch_metric_alarm.this :
-      a.alarm_actions == toset([aws_sns_topic.alarms.arn]) && a.ok_actions == toset([aws_sns_topic.alarms.arn])
+      for k, a in aws_cloudwatch_metric_alarm.this :
+      a.alarm_actions == toset([aws_sns_topic.alarms[output.alarm_severities[k]].arn]) &&
+      a.ok_actions == a.alarm_actions &&
+      startswith(a.alarm_name, "flowdesk-test-${output.alarm_severities[k]}-")
     ])
-    error_message = "どのアラームも SNS に通知する（鳴ったときと戻ったとき）。"
+    error_message = "アラームは決めた重要度のトピックだけに送り（鳴ったときと戻ったとき）、名前に重要度を入れる。"
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.http_5xx_ratio.alarm_actions == toset(["arn:aws:sns:ap-northeast-1:111122223333:flowdesk-test-alarms-critical"]) &&
+      aws_cloudwatch_metric_alarm.this["dlq-not-empty"].alarm_actions == toset(["arn:aws:sns:ap-northeast-1:111122223333:flowdesk-test-alarms-warning"])
+    )
+    error_message = "5xx の割合は critical、DLQ は warning に送る。"
+  }
+
+  assert {
+    condition = (
+      toset([for s in aws_sns_topic_subscription.email : "${s.topic_arn} ${s.endpoint}"]) == toset([
+        "arn:aws:sns:ap-northeast-1:111122223333:flowdesk-test-alarms-critical oncall@flowdesk.test",
+        "arn:aws:sns:ap-northeast-1:111122223333:flowdesk-test-alarms-warning ops@flowdesk.test",
+        "arn:aws:sns:ap-northeast-1:111122223333:flowdesk-test-alarms-warning dev@flowdesk.test",
+      ])
+    )
+    error_message = "critical は当番に、warning はチームに届く。"
+  }
+
+  # 第17章の不具合の修正：AWS 管理のキー（alias/aws/sns）では CloudWatch が発行できない
+  assert {
+    condition = alltrue([
+      for t in aws_sns_topic.alarms : t.kms_master_key_id == aws_kms_key.alarms.arn
+    ])
+    error_message = "SNS はカスタマー管理のキーで暗号化する（alias/aws/sns では CloudWatch のアラームが届かない）。"
+  }
+
+  assert {
+    condition = anytrue([
+      for st in jsondecode(aws_kms_key.alarms.policy).Statement :
+      st.Principal == { Service = "cloudwatch.amazonaws.com" } &&
+      toset(st.Action) == toset(["kms:Decrypt", "kms:GenerateDataKey*"]) &&
+      st.Condition.StringEquals["aws:SourceAccount"] == "111122223333"
+    ]) && aws_kms_key.alarms.enable_key_rotation
+    error_message = "キーのポリシーで、この アカウントの CloudWatch にだけ、暗号化に要る操作を許す。鍵はローテーションする。"
+  }
+
+  # ---- 閾値（docs/observability.md の 4、第15章の計測） ------------------------
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.this["app-p95-slo"].extended_statistic == "p95" &&
+      aws_cloudwatch_metric_alarm.this["app-p95-slo"].statistic == null &&
+      aws_cloudwatch_metric_alarm.this["app-p95-slo"].namespace == "FlowDesk" &&
+      aws_cloudwatch_metric_alarm.this["app-p95-slo"].metric_name == "RequestDuration" &&
+      aws_cloudwatch_metric_alarm.this["app-p95-slo"].dimensions == tomap({ Service = "flowdesk-web" }) &&
+      aws_cloudwatch_metric_alarm.this["app-p95-slo"].threshold == 500 &&
+      aws_cloudwatch_metric_alarm.this["app-p95-slo"].period * aws_cloudwatch_metric_alarm.this["app-p95-slo"].evaluation_periods == 900
+    )
+    error_message = "p95 は本文まで（EMF の RequestDuration）で、N-04 の 500ms を 15 分超えたら warning。ALB の TargetResponseTime（最初のバイトまで）は使わない。"
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.this["app-p95-critical"].threshold == 2000 &&
+      aws_cloudwatch_metric_alarm.this["app-p95-critical"].extended_statistic == "p95"
+    )
+    error_message = "p95 が 2 秒（N-04 の 4 倍）を 10 分超えたら critical。"
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.http_5xx_ratio.threshold == 5 &&
+      aws_cloudwatch_metric_alarm.http_5xx_ratio.evaluation_periods == 3 &&
+      aws_cloudwatch_metric_alarm.http_5xx_ratio.datapoints_to_alarm == 2 &&
+      one([for q in aws_cloudwatch_metric_alarm.http_5xx_ratio.metric_query : q.expression if q.return_data == true]) ==
+      "IF(requests >= 20, 100 * (FILL(target5xx, 0) + FILL(elb5xx, 0)) / requests, 0)" &&
+      toset([for q in aws_cloudwatch_metric_alarm.http_5xx_ratio.metric_query : one(q.metric).metric_name if length(q.metric) > 0]) ==
+      toset(["RequestCount", "HTTPCode_Target_5XX_Count", "HTTPCode_ELB_5XX_Count"])
+    )
+    error_message = "5xx は件数ではなく割合（ALB とタスクの合計 ÷ リクエスト数）。5 分に 20 件未満は数えない。"
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.this["jobs-queue-stalled"].metric_name == "ApproximateAgeOfOldestMessage" &&
+      aws_cloudwatch_metric_alarm.this["jobs-queue-stalled"].dimensions == tomap({ QueueName = "flowdesk-jobs" }) &&
+      aws_cloudwatch_metric_alarm.this["jobs-queue-stalled"].threshold == 600
+    )
+    error_message = "Worker が止まると DLQ には入らず本体のキューに溜まるので、最も古いメッセージの年齢（10 分）で見る。"
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.this["dlq-not-empty"].dimensions == tomap({ QueueName = "flowdesk-jobs-dlq" }) &&
+      aws_cloudwatch_metric_alarm.this["dlq-not-empty"].threshold == 0
+    )
+    error_message = "DLQ に 1 件でも入ったら知らせる。"
   }
 
   assert {
@@ -944,9 +1183,116 @@ run "alarms_notify_sns" {
   }
 
   assert {
-    condition     = aws_sns_topic.alarms.kms_master_key_id == "alias/aws/sns"
-    error_message = "SNS のトピックを暗号化する。"
+    condition = alltrue([
+      for a in concat(values(aws_cloudwatch_metric_alarm.this), [aws_cloudwatch_metric_alarm.http_5xx_ratio]) :
+      a.treat_missing_data == "notBreaching"
+    ])
+    error_message = "データがない（夜間にリクエストがない）ときは正常として扱う。"
   }
+
+  # ---- ECS のタスクの異常停止 --------------------------------------------------
+  assert {
+    condition = (
+      jsondecode(aws_cloudwatch_event_rule.task_stopped.event_pattern).detail.lastStatus == ["STOPPED"] &&
+      jsondecode(aws_cloudwatch_event_rule.task_stopped.event_pattern).detail.group == ["service:web", "service:worker"] &&
+      jsondecode(aws_cloudwatch_event_rule.task_stopped.event_pattern).detail["$or"][0].stopCode == ["EssentialContainerExited", "TaskFailedToStart"] &&
+      jsondecode(aws_cloudwatch_event_rule.task_stopped.event_pattern).detail["$or"][1].stoppedReason == [{ prefix = "Task failed ELB health checks" }]
+    )
+    error_message = "数えるのは異常終了・起動の失敗・ヘルスチェックの失敗で止まったタスクだけ（デプロイでの入れ替えは数えない）。"
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_target.task_stopped.arn == aws_cloudwatch_log_group.task_stops.arn &&
+      aws_cloudwatch_log_metric_filter.task_stops.metric_transformation[0].dimensions == tomap({ Group = "$.detail.group" }) &&
+      aws_cloudwatch_metric_alarm.this["ecs-web-task-stops"].dimensions == tomap({ Group = "service:web" }) &&
+      aws_cloudwatch_metric_alarm.this["ecs-web-task-stops"].threshold == 2
+    )
+    error_message = "止まったタスクを CloudWatch Logs に置いてサービスごとに数え、15 分に 2 回で critical。"
+  }
+
+  assert {
+    condition = (
+      toset(keys(aws_cloudwatch_log_metric_filter.app_errors)) == toset(["web", "worker"]) &&
+      alltrue([for f in aws_cloudwatch_log_metric_filter.app_errors : f.pattern == "{ $.level = \"error\" }"])
+    )
+    error_message = "アプリのエラーは JSON のログの level で数える（migrate は数えない）。"
+  }
+
+  # ---- ダッシュボードと Logs Insights -------------------------------------------
+  assert {
+    condition = (
+      length(jsondecode(aws_cloudwatch_dashboard.this.dashboard_body).widgets) == 7 &&
+      strcontains(aws_cloudwatch_dashboard.this.dashboard_body, "RequestDuration") &&
+      strcontains(aws_cloudwatch_dashboard.this.dashboard_body, "ApproximateAgeOfOldestMessage") &&
+      strcontains(aws_cloudwatch_dashboard.this.dashboard_body, "flowdesk-jobs-dlq") &&
+      strcontains(aws_cloudwatch_dashboard.this.dashboard_body, "EcsTaskStops")
+    )
+    error_message = "ダッシュボードに、リクエスト・p95・ECS・異常停止・キュー・RDS・最近のエラーを並べる。"
+  }
+
+  assert {
+    condition = (
+      toset(keys(aws_cloudwatch_query_definition.this)) == toset(["by-trace-id", "errors-by-message", "slow-routes", "failed-jobs"]) &&
+      strcontains(aws_cloudwatch_query_definition.this["by-trace-id"].query_string, "filter traceId =")
+    )
+    error_message = "障害対応で使うクエリ（トレース ID で引く・エラーの集計・遅いルート・失敗したジョブ）を保存する。"
+  }
+}
+
+run "monitoring_rejects_inverted_p95_thresholds" {
+  command = plan
+
+  module {
+    source = "../../modules/monitoring"
+  }
+
+  variables {
+    name                    = "flowdesk-test"
+    region                  = "ap-northeast-1"
+    alb_arn_suffix          = "app/mock/0123456789abcdef"
+    target_group_arn_suffix = "targetgroup/mock/0123456789abcdef"
+    db_instance_identifier  = "flowdesk-test"
+    cluster_name            = "flowdesk-test"
+    queue_name              = "flowdesk-jobs"
+    dlq_name                = "flowdesk-jobs-dlq"
+    log_group_names         = { web = "/w", worker = "/k" }
+    thresholds = {
+      http_5xx_percent       = 5
+      http_min_requests      = 20
+      p95_warning_ms         = 3000
+      p95_critical_ms        = 2000
+      queue_oldest_age_s     = 600
+      app_errors_per_5min    = 10
+      task_stops_per_15min   = 2
+      db_cpu_percent         = 80
+      db_free_storage_bytes  = 2147483648
+      db_connections         = 180
+      db_freeable_memory_mib = 200
+    }
+  }
+
+  expect_failures = [var.thresholds]
+}
+
+run "rds_rejects_backup_without_pitr" {
+  command = plan
+
+  module {
+    source = "../../modules/database"
+  }
+
+  variables {
+    name                      = "flowdesk-test"
+    vpc_id                    = "vpc-0123456789abcdef0"
+    subnet_ids                = ["subnet-db-a", "subnet-db-c"]
+    client_security_group_ids = { web = "sg-web" }
+    password_wo               = "test-only-password"
+    password_wo_version       = 1
+    backup_retention_days     = 0
+  }
+
+  expect_failures = [var.backup_retention_days]
 }
 
 run "waf_limits_webhook_body" {

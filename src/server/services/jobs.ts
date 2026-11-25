@@ -20,16 +20,20 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { isQueueConfigured } from "@/server/aws";
 import type { Db } from "@/server/db";
+import { logger } from "@/server/logger";
 import type { Mail } from "@/server/mail";
 import { sendJobMessage } from "@/server/queue";
+import { withSpan } from "@/server/telemetry/tracing";
 import {
   claimJob,
   completeJob,
   failJob,
   findJob,
   insertJob,
+  countFailedJobs,
   listStrandedJobs,
   markJobsPublished,
+  requeueFailedJobs,
   type NewJob,
 } from "@/server/repositories/jobs";
 
@@ -111,9 +115,11 @@ export type Dispatch = (jobIds: string[]) => Promise<void>;
 export const dispatchJobs: Dispatch = async (jobIds) => {
   if (jobIds.length === 0) return;
   if (!isQueueConfigured()) {
-    console.warn(
+    logger.warn(
       "SQS_QUEUE_URL が未設定のため、ジョブをキューに送らない",
-      jobIds,
+      {
+        jobIds,
+      },
     );
     return;
   }
@@ -123,13 +129,19 @@ export const dispatchJobs: Dispatch = async (jobIds) => {
       await sendJobMessage(id);
       sent.push(id);
     } catch (error) {
-      console.error("ジョブをキューに送れなかった", id, error);
+      logger.error("ジョブをキューに送れなかった", {
+        jobId: id,
+        err: error,
+      });
     }
   }
   if (sent.length > 0) {
     await markJobsPublished(sent, new Date()).catch(
       (error: unknown) => {
-        console.error("ジョブの送信日時を記録できなかった", error);
+        logger.error("ジョブの送信日時を記録できなかった", {
+          jobIds: sent,
+          err: error,
+        });
       },
     );
   }
@@ -252,20 +264,33 @@ export async function runJob(
     if (!handler) {
       throw new PermanentJobError(`未知のジョブ: ${job.type}`);
     }
-    const result = await handler.run(record, ctx);
+    // ハンドラーの処理をスパンにする（属性は ID と種類だけ。payload は載せない）
+    const result = await withSpan(
+      `job ${job.type}`,
+      {
+        "flowdesk.job.id": job.id,
+        "flowdesk.job.type": job.type,
+        "flowdesk.job.attempt": attempts,
+        "flowdesk.organization.id": job.organizationId ?? "",
+      },
+      () => handler.run(record, ctx),
+    );
     await completeJob(jobId, new Date(), result?.payload);
     return { status: "done" };
   } catch (error) {
     const final =
       error instanceof PermanentJobError || attempts >= MAX_ATTEMPTS;
-    console.error(
-      `ジョブが失敗（${job.type} ${jobId}、${attempts} 回目）`,
-      error,
-    );
+    logger.error("ジョブが失敗", {
+      jobId,
+      jobType: job.type,
+      attempts,
+      final,
+      err: error,
+    });
     await failJob(jobId, errorMessage(error), final, new Date());
     if (!final) return { status: "retry", attempts };
     await handler?.onFailed?.(record, ctx).catch((e: unknown) => {
-      console.error("失敗時の処理が失敗", jobId, e);
+      logger.error("失敗時の処理が失敗", { jobId, err: e });
     });
     // 形式の誤りなど再試行しても同じ失敗は、DLQ を待たずに終える
     return error instanceof PermanentJobError
@@ -291,4 +316,33 @@ export async function sweepStrandedJobs(
   });
   await dispatch(stranded.map((j) => j.id));
   return stranded.length;
+}
+
+/**
+ * 障害（SMTP が止まったなど）で failed になったジョブを再実行する（第18章）。
+ * DLQ のメッセージを本体のキューに戻すだけでは、runJob が failed のジョブを
+ * 「終わった」として捨てるので再実行されない。DB の job を queued に戻してから
+ * 送る（DLQ に残ったメッセージは、受け取っても runJob が done にするので消してよい）。
+ * 原因を直してから使う。payload の宛先・本文はそのまま使われる
+ */
+export async function retryFailedJobs(
+  input: { type: string; failedSince: Date; limit?: number },
+  dispatch: Dispatch = dispatchJobs,
+): Promise<string[]> {
+  const ids = await requeueFailedJobs({
+    type: input.type,
+    failedSince: input.failedSince,
+    limit: input.limit ?? 500,
+  });
+  logger.info("失敗したジョブを再実行する", {
+    jobType: input.type,
+    count: ids.length,
+  });
+  await dispatch(ids);
+  return ids;
+}
+
+/** 再実行の前に、失敗したジョブの数を種類ごとに見る */
+export function summarizeFailedJobs(failedSince: Date) {
+  return countFailedJobs(failedSince);
 }

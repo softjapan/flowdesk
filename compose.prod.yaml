@@ -7,6 +7,7 @@
 # - S3_ENDPOINT はコンテナの中から届く名前（s3:9000）。ブラウザからの
 #   署名付き URL の PUT・GET は届かない（npm run dev の構成で確かめる）
 # - DB は開発用（flowdesk）と分ける（flowdesk_prodlocal。migrate が作る）
+# - トレースは Jaeger（http://localhost:16686）。OTEL_SERVICE_NAME は web・worker で分ける
 x-app-env: &app-env
   NODE_ENV: production
   DATABASE_URL: postgresql://flowdesk:flowdesk@db:5432/flowdesk_prodlocal
@@ -22,6 +23,9 @@ x-app-env: &app-env
   SMTP_HOST: mail
   SMTP_PORT: "1025"
   MAIL_FROM: FlowDesk <no-reply@flowdesk.local>
+  # 第18章：トレースは compose の Jaeger へ（本番はタスクの中の ADOT Collector）
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  DEPLOYMENT_ENVIRONMENT: prodlocal
 
 # ECS と同じく、ルートを読み取り専用にし、書き込む場所だけを用意する
 x-hardening: &hardening
@@ -46,7 +50,9 @@ services:
     tmpfs:
       - /tmp
       - /app/.next/cache:uid=1000,gid=1000
-    environment: *app-env
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: flowdesk-web
     ports:
       - "3300:3000"
     depends_on:
@@ -60,7 +66,9 @@ services:
     <<: *hardening
     tmpfs:
       - /tmp:uid=1000,gid=1000
-    environment: *app-env
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: flowdesk-worker
     depends_on:
       migrate: { condition: service_completed_successfully }
       sqs: { condition: service_started }

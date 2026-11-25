@@ -33,7 +33,9 @@ import {
   enqueueMail,
   JOB_TYPES,
   MAX_ATTEMPTS,
+  retryFailedJobs,
   runJob,
+  summarizeFailedJobs,
   sweepStrandedJobs,
   type JobHandlers,
 } from "@/server/services/jobs";
@@ -283,6 +285,69 @@ describe("ジョブの二重処理の防止と再試行", () => {
       queue.dispatch,
     );
     expect(queue.ids).toContain(id);
+  });
+});
+
+describe("障害の後の再実行（第18章）", () => {
+  it("SMTP の障害で failed になったメールは、DLQ を戻すだけでは送られず、retryFailedJobs で送られる", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const down: JobHandlers = createJobHandlers({
+      mail: {
+        send: async () => {
+          throw Object.assign(new Error("connect ECONNREFUSED"), {
+            code: "ECONNREFUSED",
+          });
+        },
+      },
+    });
+    const id = await insertJob({
+      organizationId: ORG_A,
+      type: JOB_TYPES.mailSend,
+      payload: { to: "a@example.com", subject: "s", text: "t" },
+      idempotencyKey: uniqueKey("smtp-down"),
+    });
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await runJob(id, down, { now: TEST_NOW });
+    }
+    expect((await jobOf(id)).status).toBe("failed");
+    expect(await summarizeFailedJobs(startedAt)).toContainEqual({
+      type: JOB_TYPES.mailSend,
+      count: expect.any(Number),
+    });
+
+    // SMTP が戻った後：DLQ のメッセージを戻しただけでは、終わったジョブとして捨てる
+    const smtp = fakeMail();
+    const up = createJobHandlers({ mail: smtp });
+    expect(await runJob(id, up, { now: TEST_NOW })).toEqual({
+      status: "done",
+    });
+    expect(smtp.sent).toHaveLength(0);
+
+    // 再実行：queued・未送信に戻して送る
+    const queue = fakeQueue();
+    const ids = await retryFailedJobs(
+      { type: JOB_TYPES.mailSend, failedSince: startedAt },
+      queue.dispatch,
+    );
+    expect(ids).toContain(id);
+    expect(queue.ids).toContain(id);
+    expect(await jobOf(id)).toMatchObject({
+      status: "queued",
+      attempts: 0,
+      publishedAt: null,
+    });
+    expect(await runJob(id, up, { now: TEST_NOW })).toEqual({
+      status: "done",
+    });
+    expect(smtp.sent).toHaveLength(1);
+
+    // 2 回目の再実行では、成功したジョブを戻さない
+    expect(
+      await retryFailedJobs(
+        { type: JOB_TYPES.mailSend, failedSince: startedAt },
+        queue.dispatch,
+      ),
+    ).not.toContain(id);
   });
 });
 

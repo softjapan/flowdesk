@@ -33,7 +33,7 @@ Node.js 24.13.0 と Docker が必要。
 ```bash
 npm install                 # Git フックの有効化と Prisma Client の生成
 cp .env.example .env.local
-docker compose up -d --wait # PostgreSQL・S3 互換・SQS 互換・メール
+docker compose up -d --wait # PostgreSQL・S3 互換・SQS 互換・メール・トレース（Jaeger）
 npm run db:migrate          # マイグレーションを適用する
 npm run db:seed             # デモデータを入れる
 npm run aws:setup           # S3 のバケットと CORS を作る（初回だけ）
@@ -72,10 +72,11 @@ npm run worker              # 別のターミナルで。メール送信・CSV �
 |----------|-----|
 | アプリ | http://localhost:3000 |
 | メール（Mailpit） | http://localhost:8025 |
+| トレース（Jaeger、第18章） | http://localhost:16686（応答の `x-request-id` で検索する） |
 
-## 本番（AWS、第16〜17章）
+## 本番（AWS、第16〜18章）
 
-構成・シークレット・月額費用の目安は [`docs/architecture.md`](docs/architecture.md)、CI/CD（GitHub Actions・OIDC のデプロイ）と初回の手順は [`docs/ci-cd.md`](docs/ci-cd.md)、マイグレーションの流し方（expand と contract）は [`docs/migrations.md`](docs/migrations.md)。第16〜17章では AWS に接続せず、手元で次を確かめる。
+構成・シークレット・月額費用の目安は [`docs/architecture.md`](docs/architecture.md)、CI/CD（GitHub Actions・OIDC のデプロイ）と初回の手順は [`docs/ci-cd.md`](docs/ci-cd.md)、マイグレーションの流し方（expand と contract）は [`docs/migrations.md`](docs/migrations.md)、監視（ログ・トレース・アラーム）は [`docs/observability.md`](docs/observability.md)、障害対応は [`docs/runbooks/incident-ai.md`](docs/runbooks/incident-ai.md)、バックアップからの復旧は [`docs/runbooks/restore.md`](docs/runbooks/restore.md)。第16〜18章では AWS に接続せず、手元で次を確かめる。
 
 ```bash
 # 本番のイメージ（web・worker・migrate）を compose の DB・S3・SQS・メールと組み合わせて起動する
@@ -91,6 +92,11 @@ docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 
 # マイグレーションの危険な操作（npm run check にも含む）
 npm run migrations:check
+
+# 復旧の演習（手元の PostgreSQL。演習用の DB を先に作る：docs/runbooks/restore.md の 4）
+npm run drill:restore
+# 障害の後に、失敗したジョブを再実行する（--apply がなければ数えるだけ）
+npm run jobs:retry -- --since 2026-11-25T19:00:00Z
 ```
 
 ## Stripe（テストモード）
